@@ -1156,6 +1156,30 @@ class SummaryAggregator {
     // Stop typing indicator when session goes idle
     this.stopTypingIndicator();
 
+    // SDK v2 1.15.0 ya no emite `message.updated` con `time.completed` durante
+    // streaming — solo manda `message.part.delta` y luego `session.idle`. Sin
+    // este flush, `onCompleteCallback` no se dispararía nunca y todo lo que
+    // dependa de él (TTS, footer con modelo/agent, run-state cleanup) queda
+    // huérfano. Drenamos cualquier mensaje acumulado en textMessageStates aquí.
+    if (this.onCompleteCallback && this.textMessageStates.size > 0) {
+      for (const messageID of Array.from(this.textMessageStates.keys())) {
+        const finalText = this.getCombinedMessageText(messageID);
+        if (!finalText.trim()) {
+          this.cleanupCompletedMessage(messageID);
+          continue;
+        }
+        logger.debug(
+          `[Aggregator] Flushing pending assistant message on session.idle: messageId=${messageID}, textLength=${finalText.length}`,
+        );
+        try {
+          this.onCompleteCallback(sessionID, messageID, finalText, {});
+        } catch (err) {
+          logger.error("[Aggregator] Error in onComplete during idle flush:", err);
+        }
+        this.cleanupCompletedMessage(messageID);
+      }
+    }
+
     if (this.onSessionIdleCallback) {
       const callback = this.onSessionIdleCallback;
       setImmediate(() => {
