@@ -1,5 +1,5 @@
 {
-  "name": "opencode-assistant",
+  "name": "tg-opencode-assistant",
   "version": "0.19.0",
   "description": "Personal AI assistant on Telegram powered by OpenCode: persistent memory, skills, cron jobs with continue/cancel buttons, voice TTS/STT, and one-command MCP installation.",
   "type": "module",
