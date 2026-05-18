@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { t } from "../../../src/i18n/index.js";
 
 const mocked = vi.hoisted(() => ({
   sendBotTextMock: vi.fn(),
@@ -55,8 +56,8 @@ describe("bot/utils/external-user-input", () => {
     const notification = buildExternalUserInputNotification("Line 1\nLine 2");
 
     expect(notification).toEqual({
-      text: expect.stringContaining("External user input"),
-      rawFallbackText: "👤 External user input\n\n> Line 1\n> Line 2",
+      text: expect.stringContaining(t("bot.external_user_input")),
+      rawFallbackText: `👤 ${t("bot.external_user_input")}\n\n> Line 1\n> Line 2`,
     });
   });
 
@@ -75,7 +76,7 @@ describe("bot/utils/external-user-input", () => {
       expect.objectContaining({
         chatId: 777,
         format: "markdown_v2",
-        rawFallbackText: "👤 External user input\n\n> Review the parser",
+        rawFallbackText: `👤 ${t("bot.external_user_input")}\n\n> Review the parser`,
       }),
     );
   });

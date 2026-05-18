@@ -28,6 +28,31 @@ const WEEKDAY_ALIASES: Record<string, number> = {
   sat: 6,
 };
 
+// Full English weekday names as a fallback for ICU environments where
+// "short" format returns fewer than 3 characters (e.g. "Su" instead of "Sun").
+const WEEKDAY_FULL_NAMES: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+const weekdayFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getWeekdayFormatter(timezone: string): Intl.DateTimeFormat {
+  const cached = weekdayFormatterCache.get(timezone);
+  if (cached) return cached;
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "long",
+  });
+  weekdayFormatterCache.set(timezone, formatter);
+  return formatter;
+}
+
 interface CronFieldMatcher {
   wildcard: boolean;
   values: Set<number>;
@@ -200,10 +225,18 @@ function getZonedDateParts(date: Date, timezone: string): ZonedDateParts {
   const rawHour = Number(parts.find((part) => part.type === "hour")?.value);
   const hour = rawHour === 24 ? 0 : rawHour;
   const minute = Number(parts.find((part) => part.type === "minute")?.value);
-  const weekdayName = parts
-    .find((part) => part.type === "weekday")
-    ?.value?.toLowerCase()
-    .slice(0, 3);
+
+  // Use a dedicated "long" weekday formatter to avoid ICU inconsistencies
+  // where "short" may return fewer than 3 characters (e.g. "Su" vs "Sun").
+  const weekdayLong = getWeekdayFormatter(timezone).format(date).toLowerCase();
+  // Try full name first, then fall back to 3-char prefix for robustness.
+  const weekdayKey = weekdayLong in WEEKDAY_FULL_NAMES
+    ? weekdayLong
+    : weekdayLong.slice(0, 3);
+  const weekdayValue =
+    weekdayKey in WEEKDAY_FULL_NAMES
+      ? WEEKDAY_FULL_NAMES[weekdayKey]
+      : WEEKDAY_ALIASES[weekdayKey];
 
   if (
     !Number.isInteger(year) ||
@@ -211,8 +244,7 @@ function getZonedDateParts(date: Date, timezone: string): ZonedDateParts {
     !Number.isInteger(day) ||
     !Number.isInteger(hour) ||
     !Number.isInteger(minute) ||
-    !weekdayName ||
-    !(weekdayName in WEEKDAY_ALIASES)
+    weekdayValue === undefined
   ) {
     throw new Error(`Failed to resolve zoned date parts for timezone: ${timezone}`);
   }
@@ -223,7 +255,7 @@ function getZonedDateParts(date: Date, timezone: string): ZonedDateParts {
     day,
     hour,
     minute,
-    weekday: WEEKDAY_ALIASES[weekdayName],
+    weekday: weekdayValue,
   };
 }
 

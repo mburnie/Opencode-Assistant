@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@opencode-ai/sdk/v2";
 import { summaryAggregator } from "../../src/summary/aggregator.js";
+import { t } from "../../src/i18n/index.js";
 
 const mocked = vi.hoisted(() => ({
   getCurrentProjectMock: vi.fn(),
@@ -1311,7 +1312,7 @@ describe("summary/aggregator", () => {
     expect(filePayload.tool).toBe("apply_patch");
     expect(filePayload.hasFileAttachment).toBe(true);
     expect(filePayload.fileData.filename).toBe("edit_one.ts.txt");
-    expect(filePayload.fileData.buffer.toString("utf8")).toContain("Edit File/Path: src/one.ts");
+    expect(filePayload.fileData.buffer.toString("utf8")).toContain(t("tool.file_header.edit", { path: "src/one.ts" }).split("\n")[0]);
   });
 
   it("sends apply_patch file using title and patchText fallback", () => {
@@ -1371,7 +1372,7 @@ describe("summary/aggregator", () => {
 
     expect(filePayload.hasFileAttachment).toBe(true);
     expect(filePayload.fileData.filename).toBe("edit_README.md.txt");
-    expect(filePayload.fileData.buffer.toString("utf8")).toContain("Edit File/Path: README.md");
+    expect(filePayload.fileData.buffer.toString("utf8")).toContain(t("tool.file_header.edit", { path: "README.md" }).split("\n")[0]);
   });
 
   it("fires onTokens with isCompleted=true when message has completed timestamp", () => {

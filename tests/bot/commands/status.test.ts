@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Context } from "grammy";
 import { statusCommand } from "../../../src/bot/commands/status.js";
+import { t } from "../../../src/i18n/index.js";
 
 const mocked = vi.hoisted(() => ({
   healthMock: vi.fn(),
@@ -117,9 +118,9 @@ describe("bot/commands/status", () => {
     await statusCommand(ctx as never);
 
     const message = mocked.sendBotTextMock.mock.calls[0]?.[0]?.text as string;
-    expect(message).toContain("TTS replies");
-    expect(message).toContain("On");
-    expect(message).not.toContain("Started by bot");
+    expect(message).toContain(t("status.line.tts", { tts: "" }).split(":")[0]);
+    expect(message).toContain(t("status.tts.on"));
+    expect(message).not.toContain(t("status.line.managed_yes").split(":")[0]);
   });
 
   it("shows main project path and linked worktree when git metadata is available", async () => {
@@ -146,7 +147,7 @@ describe("bot/commands/status", () => {
     await statusCommand(ctx as never);
 
     const message = mocked.sendBotTextMock.mock.calls[0]?.[0]?.text as string;
-    expect(message).toContain("Project: /repo-main: feature/mobile");
-    expect(message).toContain("Worktree: /repo-feature");
+    expect(message).toContain(t("status.project_selected", { project: "/repo-main: feature/mobile" }));
+    expect(message).toContain(t("status.worktree_selected", { worktree: "/repo-feature" }));
   });
 });

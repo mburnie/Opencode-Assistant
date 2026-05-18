@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { t } from "../../../src/i18n/index.js";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -205,12 +206,12 @@ describe("file-tree", () => {
 
     it("should use singular form for 1 subfolder", () => {
       const header = buildTreeHeader("~/one", 1, 0, 1);
-      expect(header).toContain("1 subfolder");
+      expect(header).toContain(t("open.subfolder_count", { count: 1 }));
     });
 
     it("should use plural form for multiple subfolders", () => {
       const header = buildTreeHeader("~/many", 5, 0, 1);
-      expect(header).toContain("5 subfolders");
+      expect(header).toContain(t("open.subfolders_count", { count: 5 }));
     });
   });
 

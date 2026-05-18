@@ -601,12 +601,12 @@ describe("commands pagination helpers", () => {
 
   describe("formatCommandsSelectText", () => {
     it("returns base text for first page", () => {
-      expect(formatCommandsSelectText(0)).toBe("Choose an OpenCode command:");
+      expect(formatCommandsSelectText(0)).toBe(t("commands.select"));
     });
 
     it("returns page-specific text for subsequent pages", () => {
-      expect(formatCommandsSelectText(1)).toBe("Choose an OpenCode command (page 2):");
-      expect(formatCommandsSelectText(5)).toBe("Choose an OpenCode command (page 6):");
+      expect(formatCommandsSelectText(1)).toBe(t("commands.select_page", { page: 2 }));
+      expect(formatCommandsSelectText(5)).toBe(t("commands.select_page", { page: 6 }));
     });
   });
 

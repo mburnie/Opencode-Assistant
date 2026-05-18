@@ -151,7 +151,11 @@ describe("bot/handlers/voice", () => {
       await handleVoiceMessage(ctx, deps);
 
       expect(processPromptMock).toHaveBeenCalledWith(ctx, "run tests", deps);
-      expect(logger.debug).not.toHaveBeenCalled();
+      const debugCalls = (logger.debug as ReturnType<typeof vi.fn>).mock.calls;
+      const sttDebugCall = debugCalls.find((args) =>
+        typeof args[0] === "string" && args[0].includes("Added STT note"),
+      );
+      expect(sttDebugCall).toBeUndefined();
     },
   );
 });

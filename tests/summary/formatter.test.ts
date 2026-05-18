@@ -5,6 +5,7 @@ import {
   formatToolInfo,
   prepareCodeFile,
 } from "../../src/summary/formatter.js";
+import { t } from "../../src/i18n/index.js";
 
 const mocked = vi.hoisted(() => ({
   getCurrentProjectMock: vi.fn(),
@@ -271,7 +272,7 @@ describe("summary/formatter", () => {
     const writeFile = prepareCodeFile("const x = 1;", "src/app.ts", "write");
     expect(writeFile).not.toBeNull();
     expect(writeFile?.filename).toBe("write_app.ts.txt");
-    expect(writeFile?.buffer.toString("utf8")).toContain("Write File/Path: src/app.ts");
+    expect(writeFile?.buffer.toString("utf8")).toContain(t("tool.file_header.write", { path: "src/app.ts" }).split("\n")[0]);
 
     const diff = [
       "@@ -1,2 +1,2 @@",
@@ -333,6 +334,6 @@ describe("summary/formatter", () => {
     expect(editText).toContain("✏️ edit README.md (+3)");
 
     const writeFile = prepareCodeFile("content", "D:/repo/src/absolute-write.ts", "write");
-    expect(writeFile?.buffer.toString("utf8")).toContain("Write File/Path: src/absolute-write.ts");
+    expect(writeFile?.buffer.toString("utf8")).toContain(t("tool.file_header.write", { path: "src/absolute-write.ts" }).split("\n")[0]);
   });
 });
