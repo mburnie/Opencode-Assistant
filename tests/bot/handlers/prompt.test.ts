@@ -137,6 +137,10 @@ vi.mock("../../../src/external-input/suppression.js", () => ({
   },
 }));
 
+vi.mock("../../../src/memory/injector.js", () => ({
+  injectMemoryIntoPrompt: vi.fn(async (text: string) => text),
+}));
+
 function createContext(): Context {
   return {
     chat: { id: 777 },

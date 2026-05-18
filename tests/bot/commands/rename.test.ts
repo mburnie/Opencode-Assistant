@@ -123,7 +123,7 @@ describe("bot/commands/rename", () => {
       directory: "D:/repo",
       title: "New title",
     });
-    expect(mocked.setCurrentSessionMock).toHaveBeenCalledWith({
+    expect(mocked.setCurrentSessionMock).toHaveBeenCalledWith("telegram", {
       id: "session-1",
       title: "New title",
       directory: "D:/repo",
