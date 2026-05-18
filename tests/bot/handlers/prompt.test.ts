@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Context } from "grammy";
 import { processUserPrompt, type ProcessPromptDeps } from "../../../src/bot/handlers/prompt.js";
+import { t } from "../../../src/i18n/index.js";
 
 const mocked = vi.hoisted(() => ({
   currentProject: { id: "project-1", worktree: "D:\\Projects\\Repo" },
@@ -106,6 +107,10 @@ vi.mock("../../../src/utils/safe-background-task.js", () => ({
 
 vi.mock("../../../src/utils/error-format.js", () => ({
   formatErrorDetails: vi.fn(() => "formatted error"),
+}));
+
+vi.mock("../../../src/memory/injector.js", () => ({
+  injectMemoryIntoPrompt: vi.fn(async (text: string) => text),
 }));
 
 vi.mock("../../../src/scheduled-task/foreground-state.js", () => ({
@@ -255,7 +260,7 @@ describe("bot/handlers/prompt", () => {
 
     expect(deps.bot.api.sendMessage).toHaveBeenCalledWith(
       777,
-      "Failed to send request to OpenCode.",
+      t("bot.prompt_send_error"),
     );
   });
 
@@ -277,7 +282,7 @@ describe("bot/handlers/prompt", () => {
 
     expect(deps.bot.api.sendMessage).toHaveBeenCalledWith(
       777,
-      "Failed to send request to OpenCode.",
+      t("bot.prompt_send_error"),
     );
   });
 
