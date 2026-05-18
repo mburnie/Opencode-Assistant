@@ -197,7 +197,8 @@ function getZonedDateParts(date: Date, timezone: string): ZonedDateParts {
   const year = Number(parts.find((part) => part.type === "year")?.value);
   const month = Number(parts.find((part) => part.type === "month")?.value);
   const day = Number(parts.find((part) => part.type === "day")?.value);
-  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const rawHour = Number(parts.find((part) => part.type === "hour")?.value);
+  const hour = rawHour === 24 ? 0 : rawHour;
   const minute = Number(parts.find((part) => part.type === "minute")?.value);
   const weekdayName = parts
     .find((part) => part.type === "weekday")
