@@ -679,15 +679,19 @@ class SummaryAggregator {
       this.unapplyMistakenlyTextPart(part.sessionID, messageID, part.id);
       // Fire the thinking callback once per message on the first reasoning part.
       // This is the signal that the model is actually doing extended thinking.
-      if (!this.thinkingFiredForMessages.has(messageID) && this.onThinkingCallback) {
+      // Track the message regardless of whether a callback is registered, so
+      // thinkingFiredForMessages stays consistent even when onThinkingCallback is null.
+      if (!this.thinkingFiredForMessages.has(messageID)) {
         this.thinkingFiredForMessages.add(messageID);
-        const callback = this.onThinkingCallback;
-        const sessionID = part.sessionID;
-        setImmediate(() => {
-          if (typeof callback === "function") {
-            callback(sessionID);
-          }
-        });
+        if (this.onThinkingCallback) {
+          const callback = this.onThinkingCallback;
+          const sessionID = part.sessionID;
+          setImmediate(() => {
+            if (typeof callback === "function") {
+              callback(sessionID);
+            }
+          });
+        }
       }
     } else if (part.type === "text" && "text" in part && part.text) {
       const wasUpdated =
