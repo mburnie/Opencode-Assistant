@@ -18,6 +18,7 @@ import { t } from "../i18n/index.js";
 import { interactionManager as _interactionManager } from "../interaction/manager.js";
 import { clearAllInteractionState } from "../interaction/cleanup.js";
 import { keyboardManager } from "../keyboard/manager.js";
+import { opencodeClient } from "../opencode/client.js";
 import { subscribeToEvents } from "../opencode/events.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
 import { questionManager } from "../question/manager.js";
@@ -94,6 +95,29 @@ export function createEventSubscriber(
     }
 
     summaryAggregator.setTypingIndicatorEnabled(true);
+
+    // Lookup que el aggregator usa en session.idle para preguntarle al server
+    // qué partIDs son reasoning. v1.15 emite los deltas sin discriminador de
+    // tipo (todos con field=text), así que esta es la única forma fiable de
+    // separar reasoning de texto real antes de renderizar al chat.
+    summaryAggregator.setMessagePartTypeLookup(async (sessionID, messageID) => {
+      const types = new Map<string, string>();
+      try {
+        const { data } = await opencodeClient.session.message({ sessionID, messageID });
+        const parts = (data as { parts?: Array<{ id: string; type: string }> })?.parts;
+        if (Array.isArray(parts)) {
+          for (const p of parts) {
+            if (p?.id && p?.type) {
+              types.set(p.id, p.type);
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn(`[Bot] messagePartTypeLookup failed for ${messageID}:`, err);
+      }
+      return types;
+    });
+
     summaryAggregator.setOnCleared(() => {
       toolMessageBatcher.clearAll("summary_aggregator_clear");
       toolCallStreamer.clearAll("summary_aggregator_clear");

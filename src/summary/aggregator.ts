@@ -165,10 +165,22 @@ class SummaryAggregator {
   private onSessionDiffCallback: SessionDiffCallback | null = null;
   private onFileChangeCallback: FileChangeCallback | null = null;
   private onClearedCallback: ClearedCallback | null = null;
+  // Optional async lookup to ask the opencode server "which partIDs in this
+  // message are type=reasoning?". Used at session.idle to strip reasoning
+  // text from the rendered final message — see comment in handleSessionIdle.
+  private messagePartTypeLookup:
+    | ((sessionID: string, messageID: string) => Promise<Map<string, string>>)
+    | null = null;
   private processedToolStates: Set<string> = new Set();
   private thinkingFiredForMessages: Set<string> = new Set();
   private deliveredExternalUserMessageIds: Set<string> = new Set();
   private knownTextPartIds: Map<string, Set<string>> = new Map();
+  // Parts confirmed as reasoning by message.part.updated. Deltas for these
+  // partIDs are dropped (they're "thinking" content, not user-facing).
+  // Required because v1.15 emits deltas before the type-discriminator
+  // updated event for short reasoning streams — we tentatively apply as
+  // text, then rectify here once the updated arrives.
+  private knownReasoningPartIds: Map<string, Set<string>> = new Map();
   private bot: Bot | null = null;
   private chatId: number | null = null;
   private typingTimer: ReturnType<typeof setInterval> | null = null;
@@ -189,6 +201,12 @@ class SummaryAggregator {
 
   setOnComplete(callback: MessageCompleteCallback): void {
     this.onCompleteCallback = callback;
+  }
+
+  setMessagePartTypeLookup(
+    fn: (sessionID: string, messageID: string) => Promise<Map<string, string>>,
+  ): void {
+    this.messagePartTypeLookup = fn;
   }
 
   setOnPartial(callback: MessagePartialCallback): void {
@@ -385,6 +403,7 @@ class SummaryAggregator {
     this.messages.clear();
     this.partHashes.clear();
     this.knownTextPartIds.clear();
+    this.knownReasoningPartIds.clear();
     this.processedToolStates.clear();
     this.thinkingFiredForMessages.clear();
     this.deliveredExternalUserMessageIds.clear();
@@ -651,6 +670,13 @@ class SummaryAggregator {
     }
 
     if (part.type === "reasoning") {
+      // Confirm this partID is reasoning so future deltas for it get dropped.
+      this.registerKnownReasoningPart(messageID, part.id);
+      // Rectify: if deltas arrived before this update and were optimistically
+      // applied as text, remove them now. Without this, short reasoning leaks
+      // into the user-facing chat (issue with qwen, deepseek, sonnet w/o
+      // extended thinking).
+      this.unapplyMistakenlyTextPart(part.sessionID, messageID, part.id);
       // Fire the thinking callback once per message on the first reasoning part.
       // This is the signal that the model is actually doing extended thinking.
       if (!this.thinkingFiredForMessages.has(messageID) && this.onThinkingCallback) {
@@ -797,6 +823,15 @@ class SummaryAggregator {
     // `knownTextPartIds`, which `handleMessagePartUpdated` populates from
     // `message.part.updated.properties.part.type === "text"`. That is the
     // real Part-type discriminator and fires before deltas for the same part.
+    // EDGE CASE: with short reasoning streams (qwen, deepseek, Claude Sonnet
+    // in non-thinking mode), the deltas can arrive before the
+    // `message.part.updated` that says `type=reasoning`. We optimistically
+    // apply them as text below, then `handleMessagePartUpdated` rectifies
+    // by removing the wrongly-accumulated text when it confirms reasoning.
+    const knownReasoningIds = this.knownReasoningPartIds.get(messageID);
+    if (knownReasoningIds?.has(partID)) {
+      return; // already confirmed as reasoning — drop
+    }
     const knownTextIds = this.knownTextPartIds.get(messageID);
     const isKnownTextPart = knownTextIds?.has(partID) ?? false;
     const thinkingFired = this.thinkingFiredForMessages.has(messageID);
@@ -886,6 +921,7 @@ class SummaryAggregator {
     this.messages.delete(messageId);
     this.partHashes.delete(messageId);
     this.knownTextPartIds.delete(messageId);
+    this.knownReasoningPartIds.delete(messageId);
 
     if (this.textMessageStates.size === 0) {
       logger.debug("[Aggregator] No more active messages, stopping typing indicator");
@@ -926,6 +962,48 @@ class SummaryAggregator {
     }
 
     this.knownTextPartIds.get(messageID)!.add(partID);
+  }
+
+  private registerKnownReasoningPart(messageID: string, partID: string): void {
+    if (!this.knownReasoningPartIds.has(messageID)) {
+      this.knownReasoningPartIds.set(messageID, new Set());
+    }
+
+    this.knownReasoningPartIds.get(messageID)!.add(partID);
+  }
+
+  /**
+   * Undo the optimistic "applied as text" of a partID we now know was
+   * reasoning. Strips it from textMessageStates and re-emits the corrected
+   * combined text. Idempotent — safe to call when the part was never
+   * applied as text (early return on no-op).
+   */
+  private unapplyMistakenlyTextPart(
+    sessionID: string,
+    messageID: string,
+    partID: string,
+  ): void {
+    const textIds = this.knownTextPartIds.get(messageID);
+    const wasTreatedAsText = textIds?.has(partID) ?? false;
+    if (wasTreatedAsText) {
+      textIds!.delete(partID);
+    }
+
+    const state = this.textMessageStates.get(messageID);
+    if (!state) return;
+
+    const hadPart = state.partTexts.has(partID) || state.orderedPartIds.includes(partID);
+    if (!hadPart) return;
+
+    state.partTexts.delete(partID);
+    state.orderedPartIds = state.orderedPartIds.filter((id) => id !== partID);
+
+    // Re-emit corrected partial. If combined is now empty, the streamer
+    // gates on `messageText.trim()` and skips the edit — no harm done.
+    const messageInfo = this.messages.get(messageID);
+    if (messageInfo?.role !== "assistant") return;
+    const combined = this.getCombinedMessageText(messageID);
+    this.emitPartialText(sessionID, messageID, combined);
   }
 
   private registerTextPart(messageID: string, partID: string): void {
@@ -1161,23 +1239,66 @@ class SummaryAggregator {
     // este flush, `onCompleteCallback` no se dispararía nunca y todo lo que
     // dependa de él (TTS, footer con modelo/agent, run-state cleanup) queda
     // huérfano. Drenamos cualquier mensaje acumulado en textMessageStates aquí.
+    //
+    // ANTES de drenar, si tenemos un lookup configurado, le preguntamos al
+    // server qué partes son `reasoning` y las stripamos. El SDK NO emite
+    // `message.part.updated` con type=reasoning en tiempo real (al menos para
+    // razonamientos cortos), así que el aggregator no puede discriminarlas
+    // por sí solo — todos los deltas llegan con `field=text` y `type=?`. El
+    // server SÍ las tiene categorizadas en su storage.
     if (this.onCompleteCallback && this.textMessageStates.size > 0) {
-      for (const messageID of Array.from(this.textMessageStates.keys())) {
-        const finalText = this.getCombinedMessageText(messageID);
-        if (!finalText.trim()) {
+      const messagesToFlush = Array.from(this.textMessageStates.keys());
+      const callback = this.onCompleteCallback;
+      const lookup = this.messagePartTypeLookup;
+      const flushImpl = async () => {
+        for (const messageID of messagesToFlush) {
+          if (lookup) {
+            try {
+              const partTypes = await lookup(sessionID, messageID);
+              for (const [partID, type] of partTypes) {
+                if (type === "reasoning") {
+                  this.unapplyMistakenlyTextPart(sessionID, messageID, partID);
+                }
+              }
+            } catch (err) {
+              logger.warn(
+                `[Aggregator] Reasoning strip lookup failed for ${messageID}; will deliver as-is:`,
+                err,
+              );
+            }
+          }
+          const finalText = this.getCombinedMessageText(messageID);
+          if (!finalText.trim()) {
+            this.cleanupCompletedMessage(messageID);
+            continue;
+          }
+          logger.debug(
+            `[Aggregator] Flushing pending assistant message on session.idle: messageId=${messageID}, textLength=${finalText.length}`,
+          );
+          try {
+            callback(sessionID, messageID, finalText, {});
+          } catch (err) {
+            logger.error("[Aggregator] Error in onComplete during idle flush:", err);
+          }
           this.cleanupCompletedMessage(messageID);
-          continue;
         }
-        logger.debug(
-          `[Aggregator] Flushing pending assistant message on session.idle: messageId=${messageID}, textLength=${finalText.length}`,
-        );
-        try {
-          this.onCompleteCallback(sessionID, messageID, finalText, {});
-        } catch (err) {
-          logger.error("[Aggregator] Error in onComplete during idle flush:", err);
-        }
-        this.cleanupCompletedMessage(messageID);
-      }
+      };
+      // El idle callback DEBE dispararse DESPUÉS de que el flush termine,
+      // porque el handler de TTS depende del texto acumulado durante
+      // onCompleteCallback (waitForIdle mode). Si fuera al revés, el idle
+      // callback corre flushTtsText antes de que onComplete acumule —
+      // resultado: no se envía audio.
+      const idleCb = this.onSessionIdleCallback;
+      flushImpl()
+        .catch((err) => {
+          logger.error("[Aggregator] Idle flush failed:", err);
+        })
+        .finally(() => {
+          if (idleCb) {
+            setImmediate(() => idleCb(sessionID));
+          }
+        });
+      return;
     }
 
     if (this.onSessionIdleCallback) {
