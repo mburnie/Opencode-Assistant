@@ -342,6 +342,10 @@ export function createEventSubscriber(
         return;
       }
 
+      if (fileInfo.tool === "apply_patch" && shouldHideToolMessages()) {
+        return;
+      }
+
       try {
         await toolCallStreamer.breakSession(fileInfo.sessionId, "tool_file_boundary");
 
