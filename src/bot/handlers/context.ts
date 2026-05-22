@@ -9,6 +9,7 @@ import {
 } from "./inline-menu.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
+import { markCompacting, unmarkCompacting } from "../compaction-state.js";
 
 /**
  * Build inline keyboard with compact confirmation menu
@@ -93,30 +94,37 @@ export async function handleCompactConfirm(ctx: Context): Promise<boolean> {
       `[ContextHandler] Calling summarize with sessionID=${session.id}, directory=${session.directory}, model=${storedModel.providerID}/${storedModel.modelID}`,
     );
 
-    // Call summarize API (AI compaction)
-    const { error } = await opencodeClient.session.summarize({
-      sessionID: session.id,
-      directory: session.directory,
-      providerID: storedModel.providerID,
-      modelID: storedModel.modelID,
-    });
+    // Mark session as compacting so onPartial/onComplete skip the summary text
+    markCompacting(session.id);
 
-    if (error) {
-      logger.error("[ContextHandler] Compact failed:", error);
-      // Update progress message to show error
+    try {
+      // Call summarize API (AI compaction)
+      const { error } = await opencodeClient.session.summarize({
+        sessionID: session.id,
+        directory: session.directory,
+        providerID: storedModel.providerID,
+        modelID: storedModel.modelID,
+      });
+
+      if (error) {
+        logger.error("[ContextHandler] Compact failed:", error);
+        // Update progress message to show error
+        await ctx.api
+          .editMessageText(ctx.chat!.id, progressMessage.message_id, t("context.error"))
+          .catch(() => {});
+        return true;
+      }
+
+      logger.info(`[ContextHandler] Session compacted: ${session.id}`);
+      // Update progress message to show success
       await ctx.api
-        .editMessageText(ctx.chat!.id, progressMessage.message_id, t("context.error"))
+        .editMessageText(ctx.chat!.id, progressMessage.message_id, t("context.success"))
         .catch(() => {});
+
       return true;
+    } finally {
+      unmarkCompacting(session.id);
     }
-
-    logger.info(`[ContextHandler] Session compacted: ${session.id}`);
-    // Update progress message to show success
-    await ctx.api
-      .editMessageText(ctx.chat!.id, progressMessage.message_id, t("context.success"))
-      .catch(() => {});
-
-    return true;
   } catch (err) {
     clearActiveInlineMenu("context_compact_error");
     logger.error("[ContextHandler] Compact exception:", err);

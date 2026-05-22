@@ -5,8 +5,6 @@ import { logger } from "../utils/logger.js";
 export type WritableMemoryFile = "memory" | "context" | "agents" | "skills";
 export type MemoryFile = WritableMemoryFile | "soul";
 
-const SESSION_SUMMARY_FILENAME = "session-summary.md";
-
 const MEMORY_DIR = process.env.MEMORY_DIR ?? "./memory";
 
 export function getMemoryDir(): string {
@@ -228,10 +226,8 @@ export async function backupMemory(): Promise<string> {
   return backupPath;
 }
 
-// ── Session Summary ──────────────────────────────────────────────────────────
-
 export function getSessionSummaryPath(): string {
-  return path.resolve(MEMORY_DIR, SESSION_SUMMARY_FILENAME);
+  return path.resolve(MEMORY_DIR, "session-summary.md");
 }
 
 /**
@@ -247,21 +243,5 @@ export async function readSessionSummary(): Promise<string> {
     }
     logger.error("[Memory] Error reading session-summary.md:", error);
     return "";
-  }
-}
-
-/**
- * Writes (overwrites) the session summary file.
- * Called by the bot when the LLM updates the summary or via /summary command.
- */
-export async function writeSessionSummary(content: string): Promise<void> {
-  try {
-    const summaryPath = getSessionSummaryPath();
-    await fs.mkdir(path.dirname(summaryPath), { recursive: true });
-    await fs.writeFile(summaryPath, content, "utf-8");
-    logger.debug("[Memory] session-summary.md updated");
-  } catch (error) {
-    logger.error("[Memory] Error writing session-summary.md:", error);
-    throw error;
   }
 }

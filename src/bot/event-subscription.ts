@@ -34,6 +34,7 @@ import { flushTtsText, accumulateTtsText } from "../tts/client.js";
 import { logger } from "../utils/logger.js";
 import { safeBackgroundTask } from "../utils/safe-background-task.js";
 import { assistantRunState } from "./assistant-run-state.js";
+import { isCompacting, unmarkCompacting } from "./compaction-state.js";
 import {
   getEventSessionId,
   getToolStreamKey,
@@ -125,6 +126,10 @@ export function createEventSubscriber(
     });
 
     summaryAggregator.setOnPartial((sessionId, messageId, messageText) => {
+      if (isCompacting(sessionId)) {
+        return;
+      }
+
       const bot = ctx.getBot();
       const chatId = ctx.getChatId();
       if (!bot || !chatId) {
@@ -169,6 +174,16 @@ export function createEventSubscriber(
           responseStreamer.clearMessage(sessionId, messageId, "session_mismatch");
           toolCallStreamer.clearSession(sessionId, "session_mismatch");
           assistantRunState.clearRun(sessionId, "session_mismatch");
+          foregroundSessionState.markIdle(sessionId);
+          await scheduledTaskRuntime.flushDeferredDeliveries();
+          return;
+        }
+
+        if (isCompacting(sessionId)) {
+          clearPromptResponseMode(sessionId);
+          responseStreamer.clearMessage(sessionId, messageId, "compacting");
+          toolCallStreamer.clearSession(sessionId, "compacting");
+          assistantRunState.clearRun(sessionId, "compacting");
           foregroundSessionState.markIdle(sessionId);
           await scheduledTaskRuntime.flushDeferredDeliveries();
           return;
@@ -517,6 +532,8 @@ export function createEventSubscriber(
     });
 
     summaryAggregator.setOnSessionCompacted(async (sessionId, sessionDirectory) => {
+      unmarkCompacting(sessionId);
+
       if (!pinnedMessageManager.isInitialized()) {
         return;
       }
