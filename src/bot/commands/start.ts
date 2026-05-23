@@ -28,5 +28,7 @@ export async function startCommand(ctx: Context): Promise<void> {
     await pinnedMessageManager.refreshContextLimit();
   }
 
-  await ctx.reply(t("start.welcome"));
+  await ctx.reply(t("start.welcome"), {
+    reply_markup: { remove_keyboard: true },
+  });
 }
