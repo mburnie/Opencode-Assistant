@@ -11,9 +11,7 @@ const mocked = vi.hoisted(() => ({
   fetchCurrentAgentMock: vi.fn(),
   fetchCurrentModelMock: vi.fn(),
   getGitWorktreeContextMock: vi.fn(),
-  keyboardInitializeMock: vi.fn(),
-  keyboardUpdateContextMock: vi.fn(),
-  keyboardGetKeyboardMock: vi.fn(),
+
   pinnedIsInitializedMock: vi.fn(),
   pinnedInitializeMock: vi.fn(),
   pinnedGetContextLimitMock: vi.fn(),
@@ -51,14 +49,6 @@ vi.mock("../../../src/git/worktree.js", () => ({
   getGitWorktreeContext: mocked.getGitWorktreeContextMock,
 }));
 
-vi.mock("../../../src/keyboard/manager.js", () => ({
-  keyboardManager: {
-    initialize: mocked.keyboardInitializeMock,
-    updateContext: mocked.keyboardUpdateContextMock,
-    getKeyboard: mocked.keyboardGetKeyboardMock,
-  },
-}));
-
 vi.mock("../../../src/pinned/manager.js", () => ({
   pinnedMessageManager: {
     isInitialized: mocked.pinnedIsInitializedMock,
@@ -82,9 +72,7 @@ describe("bot/commands/status", () => {
     mocked.fetchCurrentAgentMock.mockReset();
     mocked.fetchCurrentModelMock.mockReset();
     mocked.getGitWorktreeContextMock.mockReset();
-    mocked.keyboardInitializeMock.mockReset();
-    mocked.keyboardUpdateContextMock.mockReset();
-    mocked.keyboardGetKeyboardMock.mockReset();
+
     mocked.pinnedIsInitializedMock.mockReset();
     mocked.pinnedInitializeMock.mockReset();
     mocked.pinnedGetContextLimitMock.mockReset();
@@ -99,7 +87,7 @@ describe("bot/commands/status", () => {
     mocked.fetchCurrentAgentMock.mockResolvedValue("build");
     mocked.fetchCurrentModelMock.mockReturnValue({ providerID: "openai", modelID: "gpt-5" });
     mocked.getGitWorktreeContextMock.mockResolvedValue(null);
-    mocked.keyboardGetKeyboardMock.mockReturnValue({ inline_keyboard: [] });
+
     mocked.pinnedIsInitializedMock.mockReturnValue(false);
     mocked.pinnedGetContextLimitMock.mockReturnValue(200000);
     mocked.pinnedRefreshContextLimitMock.mockResolvedValue(undefined);

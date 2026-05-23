@@ -31,6 +31,7 @@ export const de: I18nDictionary = {
   "cmd.description.memory_export": "Speicher in Markdown-Dateien exportieren",
   "cmd.description.memory_reembed": "Embeddings für Vektor-Speicher neu berechnen",
   "cmd.description.inline_facts": "Wie viele jüngste Fakten beim Sitzungsstart eingefügt werden",
+  "cmd.description.settings": "Schnelleinstellungen (Agent, Modell, Variante, Kontext)",
   "cmd.description.help": "Hilfe",
 
   "callback.unknown_command": "Unbekannter Befehl",
@@ -70,9 +71,9 @@ export const de: I18nDictionary = {
   "common.unknown_error": "unbekannter Fehler",
 
   "start.welcome":
-    "👋 Willkommen beim Opencode-Assistant!\n\nNutze Befehle:\n/projects — Projekt auswählen\n/sessions — Sitzungsliste\n/new — neue Sitzung\n/commands — benutzerdefinierte Befehle\n/listskill — Skills auflisten\n/task — geplante Aufgabe\n/tasklist — geplante Aufgaben\n/status — Status\n/help — Hilfe\n\nNutze die unteren Buttons, um Agent, Modell und Variante zu wählen.",
+    "👋 Willkommen beim Opencode-Assistant!\n\nNutze Befehle:\n/projects — Projekt auswählen\n/sessions — Sitzungsliste\n/new — neue Sitzung\n/commands — benutzerdefinierte Befehle\n/listskill — Skills auflisten\n/task — geplante Aufgabe\n/tasklist — geplante Aufgaben\n/settings — Schnelleinstellungen\n/status — Status\n/help — Hilfe",
   "help.keyboard_hint":
-    "💡 Nutze die unteren Buttons für Agent, Modell, Variante und Kontextaktionen.",
+    "💡 Nutze /settings für Agent, Modell, Variante und Kontext-Komprimierung.",
   "help.text":
     "📖 **Hilfe**\n\n/status - Serverstatus prüfen\n/sessions - Sitzungsliste\n/new - Neue Sitzung erstellen\n/help - Hilfe",
 
@@ -414,12 +415,11 @@ export const de: I18nDictionary = {
   "question.summary.question": "Frage {index}:\n{question}\n\n",
   "question.summary.answer": "Antwort:\n{answer}\n\n",
 
-  "keyboard.agent_mode": "{emoji} {name} Agent",
-  "keyboard.context": "📊 {used} / {limit} ({percent}%)",
-  "keyboard.context_empty": "📊 0",
-  "keyboard.variant": "💭 {name}",
-  "keyboard.variant_default": "💡 Standard",
-  "keyboard.updated": "⌨️ Tastatur aktualisiert",
+  "settings.select": "⚙️ Schnelleinstellungen — wähle eine Option:",
+  "settings.button.agent": "🤖 Agent",
+  "settings.button.model": "🧠 Modell",
+  "settings.button.variant": "💭 Variante",
+  "settings.button.context": "📊 Kontext komprimieren",
 
   "pinned.default_session_title": "neue Sitzung",
   "pinned.unknown": "Unbekannt",

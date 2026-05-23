@@ -17,7 +17,6 @@ function shouldHideToolMessages(): boolean {
 import { t } from "../i18n/index.js";
 import { interactionManager as _interactionManager } from "../interaction/manager.js";
 import { clearAllInteractionState } from "../interaction/cleanup.js";
-import { keyboardManager } from "../keyboard/manager.js";
 import { opencodeClient } from "../opencode/client.js";
 import { subscribeToEvents } from "../opencode/events.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
@@ -146,7 +145,7 @@ export function createEventSubscriber(
         return;
       }
 
-      // Reply keyboards make the first streamed message non-editable in Telegram,
+      // Inline menus make the first streamed message non-editable in Telegram,
       // so partial chunks must be sent without reply_markup and finalized later.
       preparedStreamPayload.sendOptions = { disable_notification: true };
       preparedStreamPayload.editOptions = undefined;
@@ -210,7 +209,6 @@ export function createEventSubscriber(
               ]).then(() => undefined),
             prepareStreamingPayload: deps.prepareFinalStreamingPayload,
             renderFinalParts: (text) => renderAssistantFinalPartsSafe(text),
-            getReplyKeyboard: ctx.getCurrentReplyKeyboard as never,
             sendRenderedPart: async (part, options) => {
               await sendRenderedBotPart({
                 api: botApi,
@@ -503,10 +501,6 @@ export function createEventSubscriber(
           return;
         }
 
-        // Update both keyboard and pinned state in memory (keeps them in sync)
-        if (contextLimit > 0) {
-          keyboardManager.updateContext(contextSize, contextLimit);
-        }
         pinnedMessageManager.updateTokensSilent(tokens);
 
         // Full pinned message update (API call) only on completed messages
@@ -605,7 +599,6 @@ export function createEventSubscriber(
           const modelID = completedRun.actualModelID || completedRun.configuredModelID;
 
           if (agent && providerID && modelID) {
-            const keyboard = ctx.getCurrentReplyKeyboard();
             await bot.api.sendMessage(
               chatId,
               formatAssistantRunFooter({
@@ -614,9 +607,6 @@ export function createEventSubscriber(
                 modelID,
                 elapsedMs: Date.now() - completedRun.startedAt,
               }),
-              {
-                ...(keyboard ? { reply_markup: keyboard as never } : {}),
-              },
             );
           }
         }
@@ -714,16 +704,6 @@ export function createEventSubscriber(
         return;
       }
       pinnedMessageManager.addFileChange(change);
-    });
-
-    pinnedMessageManager.setOnKeyboardUpdate(async (tokensUsed, tokensLimit) => {
-      try {
-        logger.debug(`[Bot] Updating keyboard with context: ${tokensUsed}/${tokensLimit}`);
-        keyboardManager.updateContext(tokensUsed, tokensLimit);
-        // Don't send automatic keyboard updates - keyboard will update naturally with user messages
-      } catch (err) {
-        logger.error("[Bot] Error updating keyboard context:", err);
-      }
     });
 
     logger.info(`[Bot] Subscribing to OpenCode events for project: ${directory}`);

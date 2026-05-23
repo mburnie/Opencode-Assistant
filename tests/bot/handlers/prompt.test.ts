@@ -72,14 +72,6 @@ vi.mock("../../../src/pinned/manager.js", () => ({
   },
 }));
 
-vi.mock("../../../src/keyboard/manager.js", () => ({
-  keyboardManager: {
-    initialize: vi.fn(),
-    clearContext: vi.fn(),
-    updateAgent: vi.fn(),
-  },
-}));
-
 vi.mock("../../../src/summary/aggregator.js", () => ({
   summaryAggregator: {
     setSession: mocked.setSessionSummaryMock,

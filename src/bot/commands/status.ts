@@ -6,7 +6,6 @@ import { getCurrentProject, isTtsEnabled } from "../../settings/manager.js";
 import { fetchCurrentAgent } from "../../agent/manager.js";
 import { getAgentDisplayName } from "../../agent/types.js";
 import { fetchCurrentModel } from "../../model/manager.js";
-import { keyboardManager } from "../../keyboard/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -86,23 +85,14 @@ export async function statusCommand(ctx: CommandContext<Context>) {
       if (pinnedMessageManager.getContextLimit() === 0) {
         await pinnedMessageManager.refreshContextLimit();
       }
-      keyboardManager.initialize(ctx.api, ctx.chat.id);
-    }
-    // Sync current context (tokens used + limit) into keyboard state
-    const contextInfo = pinnedMessageManager.getContextInfo();
-    if (contextInfo) {
-      keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
-    }
-    const keyboard = keyboardManager.getKeyboard();
-    if (ctx.chat) {
+
       await sendBotText({
         api: ctx.api,
         chatId: ctx.chat.id,
         text: message,
-        options: { reply_markup: keyboard },
       });
     } else {
-      await ctx.reply(message, { reply_markup: keyboard });
+      await ctx.reply(message);
     }
   } catch (error) {
     logger.error("[Bot] Error checking server status:", error);

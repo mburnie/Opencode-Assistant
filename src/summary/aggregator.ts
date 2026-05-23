@@ -557,7 +557,6 @@ class SummaryAggregator {
         logger.debug(
           `[Aggregator] Tokens: input=${tokens.input}, output=${tokens.output}, reasoning=${tokens.reasoning}, cacheRead=${tokens.cacheRead}, cacheWrite=${tokens.cacheWrite}, completed=${isCompleted}`,
         );
-        // Call synchronously so keyboardManager is updated before onComplete sends the reply
         this.onTokensCallback(tokens, isCompleted);
       }
 

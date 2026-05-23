@@ -48,14 +48,6 @@ vi.mock("../../../src/pinned/manager.js", () => ({
   },
 }));
 
-vi.mock("../../../src/keyboard/manager.js", () => ({
-  keyboardManager: {
-    initialize: vi.fn(),
-    updateAgent: vi.fn(),
-    getContextInfo: vi.fn(() => null),
-  },
-}));
-
 vi.mock("../../../src/agent/manager.js", () => ({
   getStoredAgent: vi.fn(() => "build"),
   resolveProjectAgent: vi.fn(async (agentName?: string) => agentName ?? "build"),
@@ -67,10 +59,6 @@ vi.mock("../../../src/model/manager.js", () => ({
 
 vi.mock("../../../src/variant/manager.js", () => ({
   formatVariantForButton: vi.fn(() => "Default"),
-}));
-
-vi.mock("../../../src/bot/utils/keyboard.js", () => ({
-  createMainKeyboard: vi.fn(() => ({ keyboard: true })),
 }));
 
 vi.mock("../../../src/attach/service.js", () => ({
@@ -137,11 +125,6 @@ describe("bot/commands/new", () => {
       },
       ensureEventSubscription: mocked.ensureEventSubscriptionMock,
     });
-    expect(ctx.reply).toHaveBeenCalledWith(
-      t("new.created", { title: "Session Two" }),
-      expect.objectContaining({
-        reply_markup: { keyboard: true },
-      }),
-    );
+    expect(ctx.reply).toHaveBeenCalledWith(t("new.created", { title: "Session Two" }));
   });
 });

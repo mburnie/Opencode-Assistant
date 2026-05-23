@@ -6,7 +6,6 @@ import { resolveProjectAgent } from "../../agent/manager.js";
 import { setCurrentSession, SessionInfo } from "../../session/manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
-import { keyboardManager } from "../../keyboard/manager.js";
 import {
   appendInlineMenuCancelButton,
   ensureActiveInlineMenu,
@@ -296,14 +295,6 @@ export async function handleSessionSelect(ctx: Context, deps: SessionSelectDeps)
 
     if (ctx.chat) {
       const chatId = ctx.chat.id;
-      const currentAgent = await resolveProjectAgent();
-
-      keyboardManager.updateAgent(currentAgent);
-
-      const contextInfo = keyboardManager.getContextInfo();
-      if (contextInfo) {
-        keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
-      }
 
       // Delete loading message
       if (loadingMessageId) {
@@ -314,12 +305,9 @@ export async function handleSessionSelect(ctx: Context, deps: SessionSelectDeps)
         }
       }
 
-      // Send session selection confirmation with updated keyboard
-      const keyboard = keyboardManager.getKeyboard();
+      // Send session selection confirmation
       try {
-        await ctx.api.sendMessage(chatId, t("sessions.selected", { title: session.title }), {
-          reply_markup: keyboard,
-        });
+        await ctx.api.sendMessage(chatId, t("sessions.selected", { title: session.title }));
       } catch (err) {
         logger.error("[Sessions] Failed to send selection message:", err);
       }

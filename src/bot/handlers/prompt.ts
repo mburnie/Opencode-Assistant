@@ -5,11 +5,8 @@ import { clearSession, getCurrentSession, setCurrentSession } from "../../sessio
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
 import { getCurrentProject, isTtsEnabled } from "../../settings/manager.js";
 import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
-import { getStoredModel } from "../../model/manager.js";
-import { formatVariantForButton } from "../../variant/manager.js";
-import { createMainKeyboard } from "../utils/keyboard.js";
-import { keyboardManager } from "../../keyboard/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
+import { getStoredModel } from "../../model/manager.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { stopEventListening } from "../../opencode/events.js";
 import { interactionManager } from "../../interaction/manager.js";
@@ -92,7 +89,6 @@ async function resetMismatchedSessionContext(): Promise<void> {
   assistantRunState.clearAll("session_mismatch_reset");
   clearAllInteractionState("session_mismatch_reset");
   clearSession();
-  keyboardManager.clearContext();
 
   if (!pinnedMessageManager.isInitialized()) {
     return;
@@ -190,21 +186,7 @@ export async function processUserPrompt(
   });
 
   if (createdNewSession) {
-    const currentAgent = await resolveProjectAgent(getStoredAgent());
-    const currentModel = getStoredModel();
-    keyboardManager.updateAgent(currentAgent);
-    const contextInfo = keyboardManager.getContextInfo();
-    const variantName = formatVariantForButton(currentModel.variant || "default");
-    const keyboard = createMainKeyboard(
-      currentAgent,
-      currentModel,
-      contextInfo ?? undefined,
-      variantName,
-    );
-
-    await ctx.reply(t("bot.session_created", { title: currentSession.title }), {
-      reply_markup: keyboard,
-    });
+    await ctx.reply(t("bot.session_created", { title: currentSession.title }));
   }
 
   const sessionIsBusy = await isSessionBusy(currentSession.id, currentSession.directory);

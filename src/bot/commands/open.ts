@@ -359,16 +359,14 @@ async function selectDirectory(ctx: Context, directory: string) {
     await upsertSessionDirectory(directory, Date.now());
 
     const projectInfo = await getProjectByWorktree(directory);
-    const replyKeyboard = await switchToProject(
+    await switchToProject(
       ctx,
       { ...projectInfo, name: displayPath },
       "open_project_selected",
     );
 
     await ctx.answerCallbackQuery();
-    await ctx.reply(t("open.selected", { project: displayPath }), {
-      reply_markup: replyKeyboard,
-    });
+    await ctx.reply(t("open.selected", { project: displayPath }));
 
     // Clean up the inline menu message
     await ctx.deleteMessage();

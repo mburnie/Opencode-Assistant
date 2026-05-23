@@ -31,6 +31,7 @@ export const zh: I18nDictionary = {
   "cmd.description.memory_export": "将记忆导出为 markdown 文件",
   "cmd.description.memory_reembed": "重新计算向量记忆的嵌入向量",
   "cmd.description.inline_facts": "会话开始时内联多少条最近事实",
+  "cmd.description.settings": "快速设置（Agent、模型、变体、上下文）",
   "cmd.description.help": "帮助",
 
   "callback.unknown_command": "未知命令",
@@ -63,8 +64,8 @@ export const zh: I18nDictionary = {
   "common.unknown_error": "未知错误",
 
   "start.welcome":
-    "👋 欢迎使用 Opencode-Assistant！\n\n可用命令：\n/projects — 选择项目\n/sessions — 会话列表\n/new — 新建会话\n/commands — 自定义命令\n/listskill — 列出技能\n/task — 定时任务\n/tasklist — 定时任务列表\n/status — 状态\n/help — 帮助\n\n请使用底部按钮选择 Agent、模型和变体。",
-  "help.keyboard_hint": "💡 Agent、模型、变体和上下文操作请使用底部键盘按钮。",
+    "👋 欢迎使用 Opencode-Assistant！\n\n可用命令：\n/projects — 选择项目\n/sessions — 会话列表\n/new — 新建会话\n/commands — 自定义命令\n/listskill — 列出技能\n/task — 定时任务\n/tasklist — 定时任务列表\n/settings — 快速设置\n/status — 状态\n/help — 帮助",
+  "help.keyboard_hint": "💡 使用 /settings 更改 Agent、模型、变体和压缩上下文。",
   "help.text":
     "📖 **帮助**\n\n/status - 查看服务器状态\n/sessions - 会话列表\n/new - 创建新会话\n/help - 帮助",
 
@@ -363,12 +364,11 @@ export const zh: I18nDictionary = {
   "question.summary.question": "问题 {index}：\n{question}\n\n",
   "question.summary.answer": "回答：\n{answer}\n\n",
 
-  "keyboard.agent_mode": "{emoji} {name} Agent",
-  "keyboard.context": "📊 {used} / {limit} ({percent}%)",
-  "keyboard.context_empty": "📊 0",
-  "keyboard.variant": "💭 {name}",
-  "keyboard.variant_default": "💡 默认",
-  "keyboard.updated": "⌨️ 键盘已更新",
+  "settings.select": "⚙️ 快速设置 — 选择一个选项：",
+  "settings.button.agent": "🤖 Agent",
+  "settings.button.model": "🧠 模型",
+  "settings.button.variant": "💭 变体",
+  "settings.button.context": "📊 压缩上下文",
 
   "pinned.default_session_title": "新会话",
   "pinned.unknown": "未知",

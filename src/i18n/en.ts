@@ -28,6 +28,7 @@ export const en = {
   "cmd.description.memory_export": "Export memory to markdown files",
   "cmd.description.memory_reembed": "Recompute embeddings for vector memory",
   "cmd.description.inline_facts": "Set how many recent facts to inline at session start",
+  "cmd.description.settings": "Quick settings (agent, model, variant, context)",
   "cmd.description.help": "Help",
 
   "callback.unknown_command": "Unknown command",
@@ -66,9 +67,9 @@ export const en = {
   "common.unknown_error": "unknown error",
 
   "start.welcome":
-    "👋 Welcome to Opencode-Assistant!\n\nUse commands:\n/projects — select project\n/sessions — session list\n/new — new session\n/commands — custom commands\n/listskill — list skills\n/task — scheduled task\n/tasklist — scheduled tasks\n/status — status\n/help — help\n\nUse the bottom buttons to select the agent, model, and variant.",
+    "👋 Welcome to Opencode-Assistant!\n\nUse commands:\n/projects — select project\n/sessions — session list\n/new — new session\n/commands — custom commands\n/listskill — list skills\n/task — scheduled task\n/tasklist — scheduled tasks\n/settings — quick settings\n/status — status\n/help — help",
   "help.keyboard_hint":
-    "💡 Use the bottom keyboard buttons for the agent, model, variant, and context actions.",
+    "💡 Use /settings to change the agent, model, variant, and compact context.",
   "help.text":
     "📖 **Help**\n\n/status - Check server status\n/sessions - Session list\n/new - Create new session\n/help - Help",
 
@@ -397,12 +398,11 @@ export const en = {
   "question.summary.question": "Question {index}:\n{question}\n\n",
   "question.summary.answer": "Answer:\n{answer}\n\n",
 
-  "keyboard.agent_mode": "{emoji} {name} Agent",
-  "keyboard.context": "📊 {used} / {limit} ({percent}%)",
-  "keyboard.context_empty": "📊 0",
-  "keyboard.variant": "💭 {name}",
-  "keyboard.variant_default": "💡 Default",
-  "keyboard.updated": "⌨️ Keyboard updated",
+  "settings.select": "⚙️ Quick Settings — choose an option:",
+  "settings.button.agent": "🤖 Agent",
+  "settings.button.model": "🧠 Model",
+  "settings.button.variant": "💭 Variant",
+  "settings.button.context": "📊 Compact context",
 
   "pinned.default_session_title": "new session",
   "pinned.unknown": "Unknown",

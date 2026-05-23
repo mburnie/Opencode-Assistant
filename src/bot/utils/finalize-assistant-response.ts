@@ -10,7 +10,6 @@ interface FinalizeAssistantResponseOptions {
   flushPendingServiceMessages: () => Promise<void>;
   prepareStreamingPayload: (messageText: string) => StreamingMessagePayload | null;
   renderFinalParts: (messageText: string) => TelegramRenderedPart[];
-  getReplyKeyboard: () => unknown;
   sendRenderedPart: (
     part: TelegramRenderedPart,
     options:
@@ -30,7 +29,6 @@ export async function finalizeAssistantResponse({
   flushPendingServiceMessages,
   prepareStreamingPayload,
   renderFinalParts,
-  getReplyKeyboard,
   sendRenderedPart,
 }: FinalizeAssistantResponseOptions): Promise<boolean> {
   logger.debug(
@@ -38,11 +36,8 @@ export async function finalizeAssistantResponse({
     messageText,
   );
 
-  const keyboard = getReplyKeyboard();
-  const replyOptions = keyboard ? { reply_markup: keyboard } : undefined;
   const silentReplyOptions = {
     disable_notification: true,
-    ...(replyOptions ?? {}),
   };
   const streamSendOptions = {
     ...silentReplyOptions,

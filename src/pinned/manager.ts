@@ -40,7 +40,6 @@ class PinnedMessageManager {
     cost: 0,
   };
   private contextLimit: number | null = null;
-  private onKeyboardUpdateCallback?: (tokensUsed: number, tokensLimit: number) => void;
   private updateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private updateTask: Promise<void> | null = null;
   private pendingUpdate = false;
@@ -83,11 +82,6 @@ class PinnedMessageManager {
     // Fetch context limit for current model
     await this.fetchContextLimit();
 
-    // Trigger keyboard update callback with reset context (0 tokens)
-    if (this.onKeyboardUpdateCallback && this.state.tokensLimit > 0) {
-      this.onKeyboardUpdateCallback(this.state.tokensUsed, this.state.tokensLimit);
-    }
-
     // Reset changed files for new session
     this.state.changedFiles = [];
     this.lastRenderedMessageText = null;
@@ -119,10 +113,6 @@ class PinnedMessageManager {
 
     await this.refreshProjectMetadata();
     await this.fetchContextLimit();
-
-    if (this.onKeyboardUpdateCallback && this.state.tokensLimit > 0) {
-      this.onKeyboardUpdateCallback(this.state.tokensUsed, this.state.tokensLimit);
-    }
 
     await this.updatePinnedMessage(true);
     await this.loadDiffsFromApi(sessionId);
@@ -259,8 +249,7 @@ class PinnedMessageManager {
 
   /**
    * Update tokens in memory without triggering an API call.
-   * Used for intermediate (non-completed) message.updated events
-   * to keep pinned state in sync with keyboardManager.
+   * Used for intermediate (non-completed) message.updated events.
    */
   updateTokensSilent(tokens: TokensInfo): void {
     this.state.tokensUsed = tokens.input + tokens.cacheRead;
@@ -296,21 +285,6 @@ class PinnedMessageManager {
   }
 
   /**
-   * Set callback for keyboard updates when context changes
-   */
-  setOnKeyboardUpdate(callback: (tokensUsed: number, tokensLimit: number) => void): void {
-    this.onKeyboardUpdateCallback = callback;
-    logger.debug("[PinnedManager] Keyboard update callback registered");
-
-    // Fire immediately with current state to fix race condition:
-    // onSessionChange may have already run before this callback was registered.
-    const limit = this.state.tokensLimit > 0 ? this.state.tokensLimit : this.contextLimit || 0;
-    if (limit > 0) {
-      callback(this.state.tokensUsed, limit);
-    }
-  }
-
-  /**
    * Get current context information
    */
   getContextInfo(): { tokensUsed: number; tokensLimit: number } | null {
@@ -326,7 +300,7 @@ class PinnedMessageManager {
   }
 
   /**
-   * Get context limit (for keyboard display when no session)
+   * Get context limit
    * Returns cached limit or 0 if not available
    */
   getContextLimit(): number {
@@ -797,13 +771,6 @@ class PinnedMessageManager {
         this.lastRenderedMessageText = text;
 
         logger.debug(`[PinnedManager] Updated pinned message: ${this.state.messageId}`);
-
-        // Trigger keyboard update callback
-        if (this.onKeyboardUpdateCallback && this.state.tokensLimit > 0) {
-          setImmediate(() => {
-            this.onKeyboardUpdateCallback!(this.state.tokensUsed, this.state.tokensLimit);
-          });
-        }
       } catch (err: unknown) {
         const errorMessage =
           err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();

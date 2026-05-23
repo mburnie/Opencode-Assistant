@@ -229,36 +229,5 @@ describe("pinned/manager", () => {
     });
   });
 
-  describe("setOnKeyboardUpdate race condition fix", () => {
-    it("fires callback immediately with current state when contextLimit is known", async () => {
-      // Create session to set contextLimit
-      await pinnedMessageManager.onSessionChange("ses-1", "Test Session");
 
-      const callback = vi.fn();
-      pinnedMessageManager.setOnKeyboardUpdate(callback);
-
-      // Should have been called immediately with (tokensUsed=0, limit=204800)
-      expect(callback).toHaveBeenCalledTimes(1);
-      expect(callback).toHaveBeenCalledWith(0, 204800);
-    });
-
-    it("fires callback with updated tokens after silent update", async () => {
-      await pinnedMessageManager.onSessionChange("ses-1", "Test Session");
-
-      pinnedMessageManager.updateTokensSilent({
-        input: 3000,
-        output: 100,
-        reasoning: 0,
-        cacheRead: 500,
-        cacheWrite: 0,
-      });
-
-      const callback = vi.fn();
-      pinnedMessageManager.setOnKeyboardUpdate(callback);
-
-      // Should fire with tokensUsed = 3000 + 500 = 3500
-      expect(callback).toHaveBeenCalledTimes(1);
-      expect(callback).toHaveBeenCalledWith(3500, 204800);
-    });
-  });
 });

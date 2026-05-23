@@ -17,19 +17,11 @@ interface SummaryAggregatorPrivateState {
   typingIndicatorEnabled: boolean;
 }
 
-interface KeyboardManagerPrivateState {
-  state: null;
-  api: null;
-  chatId: null;
-  lastUpdateTime: number;
-}
-
 interface PinnedMessageManagerPrivateState {
   api: null;
   chatId: null;
   contextLimit: null;
   updateDebounceTimer: ReturnType<typeof setTimeout> | null;
-  onKeyboardUpdateCallback: undefined;
   state: {
     messageId: null;
     chatId: null;
@@ -51,7 +43,6 @@ export async function resetSingletonState(): Promise<void> {
     { renameManager },
     { interactionManager },
     { summaryAggregator },
-    { keyboardManager },
     { pinnedMessageManager },
     { stopEventListening },
     { __resetSessionDirectoryCacheForTests },
@@ -62,7 +53,6 @@ export async function resetSingletonState(): Promise<void> {
     import("../../src/rename/manager.js"),
     import("../../src/interaction/manager.js"),
     import("../../src/summary/aggregator.js"),
-    import("../../src/keyboard/manager.js"),
     import("../../src/pinned/manager.js"),
     import("../../src/opencode/events.js"),
     import("../../src/session/cache-manager.js"),
@@ -94,12 +84,6 @@ export async function resetSingletonState(): Promise<void> {
   aggregator.chatId = null;
   aggregator.typingIndicatorEnabled = true;
 
-  const keyboard = keyboardManager as unknown as KeyboardManagerPrivateState;
-  keyboard.state = null;
-  keyboard.api = null;
-  keyboard.chatId = null;
-  keyboard.lastUpdateTime = 0;
-
   const pinned = pinnedMessageManager as unknown as PinnedMessageManagerPrivateState;
   if (pinned.updateDebounceTimer) {
     clearTimeout(pinned.updateDebounceTimer);
@@ -108,7 +92,6 @@ export async function resetSingletonState(): Promise<void> {
   pinned.api = null;
   pinned.chatId = null;
   pinned.contextLimit = null;
-  pinned.onKeyboardUpdateCallback = undefined;
   pinned.state = {
     messageId: null,
     chatId: null,

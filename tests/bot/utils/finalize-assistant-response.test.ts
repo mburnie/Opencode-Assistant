@@ -8,7 +8,6 @@ describe("bot/utils/finalize-assistant-response", () => {
     };
     const flushPendingServiceMessages = vi.fn().mockResolvedValue(undefined);
     const sendRenderedPart = vi.fn().mockResolvedValue(undefined);
-    const keyboard = { keyboard: [[{ text: "A" }]] };
 
     await finalizeAssistantResponse({
       sessionId: "s1",
@@ -38,7 +37,6 @@ describe("bot/utils/finalize-assistant-response", () => {
           source: "plain" as const,
         },
       ]),
-      getReplyKeyboard: vi.fn(() => keyboard),
       sendRenderedPart,
     });
 
@@ -50,7 +48,7 @@ describe("bot/utils/finalize-assistant-response", () => {
           source: "plain",
         },
       ],
-      sendOptions: { disable_notification: true, reply_markup: keyboard },
+      sendOptions: { disable_notification: true },
       editOptions: undefined,
     });
     expect(flushPendingServiceMessages).toHaveBeenCalledTimes(1);
@@ -63,7 +61,7 @@ describe("bot/utils/finalize-assistant-response", () => {
         fallbackText: "part 1",
         source: "entities",
       },
-      { disable_notification: true, reply_markup: keyboard },
+      { disable_notification: true },
     );
     expect(sendRenderedPart).toHaveBeenNthCalledWith(
       2,
@@ -72,7 +70,7 @@ describe("bot/utils/finalize-assistant-response", () => {
         fallbackText: "part 2",
         source: "plain",
       },
-      { disable_notification: true, reply_markup: keyboard },
+      { disable_notification: true },
     );
   });
 
@@ -91,7 +89,6 @@ describe("bot/utils/finalize-assistant-response", () => {
         },
       ],
     }));
-    const keyboard = { keyboard: [[{ text: "ctx" }]] };
 
     await finalizeAssistantResponse({
       sessionId: "s1",
@@ -107,7 +104,6 @@ describe("bot/utils/finalize-assistant-response", () => {
           source: "plain" as const,
         },
       ]),
-      getReplyKeyboard: vi.fn(() => keyboard),
       sendRenderedPart,
     });
 
@@ -119,14 +115,14 @@ describe("bot/utils/finalize-assistant-response", () => {
           source: "plain",
         },
       ],
-      sendOptions: { disable_notification: true, reply_markup: keyboard },
+      sendOptions: { disable_notification: true },
       editOptions: undefined,
     });
     expect(flushPendingServiceMessages).toHaveBeenCalledTimes(1);
     expect(sendRenderedPart).not.toHaveBeenCalled();
   });
 
-  it("still sends rendered parts with keyboard when streamer reports not streamed", async () => {
+  it("still sends rendered parts when streamer reports not streamed", async () => {
     const responseStreamer = {
       complete: vi.fn().mockResolvedValue({ streamed: false, telegramMessageIds: [] }),
     };
@@ -156,7 +152,6 @@ describe("bot/utils/finalize-assistant-response", () => {
           source: "plain" as const,
         },
       ]),
-      getReplyKeyboard: vi.fn(() => undefined),
       sendRenderedPart,
     });
 

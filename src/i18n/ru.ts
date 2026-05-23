@@ -31,6 +31,7 @@ export const ru: I18nDictionary = {
   "cmd.description.memory_export": "Экспортировать память в markdown-файлы",
   "cmd.description.memory_reembed": "Пересчитать эмбеддинги векторной памяти",
   "cmd.description.inline_facts": "Сколько недавних фактов вставлять при старте сессии",
+  "cmd.description.settings": "Быстрые настройки (агент, модель, вариант, контекст)",
   "cmd.description.help": "Справка",
 
   "callback.unknown_command": "Неизвестная команда",
@@ -67,9 +68,9 @@ export const ru: I18nDictionary = {
   "common.unknown_error": "неизвестная ошибка",
 
   "start.welcome":
-    "👋 Добро пожаловать в Opencode-Assistant!\n\nИспользуйте команды:\n/projects — выбрать проект\n/sessions — список сессий\n/new — новая сессия\n/commands — пользовательские команды\n/listskill — список скиллов\n/task — задача по расписанию\n/tasklist — список задач по расписанию\n/status — статус\n/help — справка\n\nАгент, модель и вариант выбираются кнопками внизу.",
+    "👋 Добро пожаловать в Opencode-Assistant!\n\nИспользуйте команды:\n/projects — выбрать проект\n/sessions — список сессий\n/new — новая сессия\n/commands — пользовательские команды\n/listskill — список скиллов\n/task — задача по расписанию\n/tasklist — список задач по расписанию\n/settings — быстрые настройки\n/status — статус\n/help — справка",
   "help.keyboard_hint":
-    "💡 Агент, модель, вариант и действия с контекстом доступны через нижние кнопки клавиатуры.",
+    "💡 Используйте /settings для смены агента, модели, варианта и сжатия контекста.",
   "help.text":
     "📖 **Справка**\n\n/status - Проверить статус сервера\n/sessions - Список сессий\n/new - Создать новую сессию\n/help - Справка",
 
@@ -401,12 +402,11 @@ export const ru: I18nDictionary = {
   "question.summary.question": "Вопрос {index}:\n{question}\n\n",
   "question.summary.answer": "Ответ:\n{answer}\n\n",
 
-  "keyboard.agent_mode": "{emoji} {name} Agent",
-  "keyboard.context": "📊 {used} / {limit} ({percent}%)",
-  "keyboard.context_empty": "📊 0",
-  "keyboard.variant": "💭 {name}",
-  "keyboard.variant_default": "💡 Default",
-  "keyboard.updated": "⌨️ Клавиатура обновлена",
+  "settings.select": "⚙️ Быстрые настройки — выберите опцию:",
+  "settings.button.agent": "🤖 Агент",
+  "settings.button.model": "🧠 Модель",
+  "settings.button.variant": "💭 Вариант",
+  "settings.button.context": "📊 Сжать контекст",
 
   "pinned.default_session_title": "новая сессия",
   "pinned.unknown": "Неизвестно",

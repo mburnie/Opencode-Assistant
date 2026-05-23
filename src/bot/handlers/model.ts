@@ -10,12 +10,9 @@ import {
 } from "../../model/manager.js";
 import { formatModelForDisplay } from "../../model/types.js";
 import type { ModelInfo } from "../../model/types.js";
-import { formatVariantForButton } from "../../variant/manager.js";
 import { logger } from "../../utils/logger.js";
-import { createMainKeyboard } from "../utils/keyboard.js";
 import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
-import { keyboardManager } from "../../keyboard/manager.js";
 import { interactionManager } from "../../interaction/manager.js";
 import type { InteractionState } from "../../interaction/types.js";
 import { t } from "../../i18n/index.js";
@@ -160,34 +157,15 @@ function pageHeader(page: number, total: number): string {
 
 async function commitModelSelection(ctx: Context, modelInfo: ModelInfo): Promise<void> {
   selectModel(modelInfo);
-  keyboardManager.updateModel(modelInfo);
   await pinnedMessageManager.refreshContextLimit();
 
-  const currentAgent = await resolveProjectAgent(getStoredAgent());
-  const contextInfo =
-    pinnedMessageManager.getContextInfo() ??
-    (pinnedMessageManager.getContextLimit() > 0
-      ? { tokensUsed: 0, tokensLimit: pinnedMessageManager.getContextLimit() }
-      : null);
-
-  keyboardManager.updateAgent(currentAgent);
-  if (contextInfo) {
-    keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
-  }
-
-  const variantName = formatVariantForButton(modelInfo.variant || "default");
-  const keyboard = createMainKeyboard(currentAgent, modelInfo, contextInfo ?? undefined, variantName);
   const displayName = formatModelForDisplay(modelInfo.providerID, modelInfo.modelID);
 
-  await ctx.reply(t("model.changed_message", { name: displayName }), { reply_markup: keyboard });
+  await ctx.reply(t("model.changed_message", { name: displayName }));
 }
 
 export async function showModelSelectionMenu(ctx: Context): Promise<void> {
   try {
-    if (ctx.chat) {
-      keyboardManager.initialize(ctx.api, ctx.chat.id);
-    }
-
     const message = await ctx.reply(t("model.menu.category_select"), {
       reply_markup: buildCategoryKeyboard(),
     });

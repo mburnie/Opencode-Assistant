@@ -14,17 +14,9 @@ import {
   sendRenderedBotPart,
 } from "./utils/telegram-text.js";
 
-/**
- * Runtime accessors that the streamers need at call time. Streamers are
- * instantiated at module evaluation time, but the bot instance and chat ID
- * are only known after `createBot()` runs, so we pass getters instead of
- * raw values. The keyboard accessor returns whatever the project's keyboard
- * manager produces (a grammY reply markup or undefined).
- */
 export interface BotContext {
   getBot(): Bot<Context> | null;
   getChatId(): number | null;
-  getCurrentReplyKeyboard(): unknown;
 }
 
 export function createToolMessageBatcher(deps: {
@@ -46,11 +38,8 @@ export function createToolMessageBatcher(deps: {
         return;
       }
 
-      const keyboard = ctx.getCurrentReplyKeyboard();
-
       await bot.api.sendMessage(chatId, text, {
         disable_notification: true,
-        ...(keyboard ? { reply_markup: keyboard as never } : {}),
       });
     },
     sendFile: async (sessionId, fileData) => {
@@ -75,12 +64,9 @@ export function createToolMessageBatcher(deps: {
         await fs.mkdir(tempDir, { recursive: true });
         await fs.writeFile(tempFilePath, fileData.buffer);
 
-        const keyboard = ctx.getCurrentReplyKeyboard();
-
         await bot.api.sendDocument(chatId, new InputFile(tempFilePath), {
           caption: fileData.caption,
           disable_notification: true,
-          ...(keyboard ? { reply_markup: keyboard as never } : {}),
         });
       } finally {
         await fs.unlink(tempFilePath).catch(() => {});

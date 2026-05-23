@@ -46,13 +46,6 @@ vi.mock("../../../src/pinned/manager.js", () => ({
   },
 }));
 
-vi.mock("../../../src/keyboard/manager.js", () => ({
-  keyboardManager: {
-    initialize: vi.fn(),
-    updateContext: vi.fn(),
-  },
-}));
-
 vi.mock("../../../src/agent/manager.js", () => ({
   getStoredAgent: vi.fn(() => "build"),
 }));
@@ -67,10 +60,6 @@ vi.mock("../../../src/variant/manager.js", () => ({
 
 vi.mock("../../../src/interaction/cleanup.js", () => ({
   clearAllInteractionState: vi.fn(),
-}));
-
-vi.mock("../../../src/bot/utils/keyboard.js", () => ({
-  createMainKeyboard: vi.fn(() => ({ keyboard: true })),
 }));
 
 vi.mock("../../../src/bot/handlers/inline-menu.js", () => ({

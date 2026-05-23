@@ -1,12 +1,7 @@
 import { Context, InlineKeyboard } from "grammy";
 import { selectAgent, getAvailableAgents, fetchCurrentAgent } from "../../agent/manager.js";
 import { getAgentDisplayName } from "../../agent/types.js";
-import { getStoredModel } from "../../model/manager.js";
-import { formatVariantForButton } from "../../variant/manager.js";
 import { logger } from "../../utils/logger.js";
-import { createMainKeyboard } from "../utils/keyboard.js";
-import { pinnedMessageManager } from "../../pinned/manager.js";
-import { keyboardManager } from "../../keyboard/manager.js";
 import {
   clearActiveInlineMenu,
   ensureActiveInlineMenu,
@@ -34,55 +29,17 @@ export async function handleAgentSelect(ctx: Context): Promise<boolean> {
   logger.debug(`[AgentHandler] Received callback: ${callbackQuery.data}`);
 
   try {
-    if (ctx.chat) {
-      keyboardManager.initialize(ctx.api, ctx.chat.id);
-    }
-
-    if (pinnedMessageManager.getContextLimit() === 0) {
-      await pinnedMessageManager.refreshContextLimit();
-    }
-
     const agentName = callbackQuery.data.replace("agent:", "");
 
-    // Select agent and persist
     selectAgent(agentName);
 
-    // Update keyboard manager state
-    keyboardManager.updateAgent(agentName);
-
-    // Update Reply Keyboard with new agent, current model, and context
-    const currentModel = getStoredModel();
-    const contextInfo =
-      pinnedMessageManager.getContextInfo() ??
-      (pinnedMessageManager.getContextLimit() > 0
-        ? { tokensUsed: 0, tokensLimit: pinnedMessageManager.getContextLimit() }
-        : null);
-
-    keyboardManager.updateModel(currentModel);
-    if (contextInfo) {
-      keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
-    }
-
-    const state = keyboardManager.getState();
-    const variantName =
-      state?.variantName ?? formatVariantForButton(currentModel.variant || "default");
-    const keyboard = createMainKeyboard(
-      agentName,
-      currentModel,
-      contextInfo ?? undefined,
-      variantName,
-    );
     const displayName = getAgentDisplayName(agentName);
 
     clearActiveInlineMenu("agent_selected");
 
-    // Send confirmation message with updated keyboard
     await ctx.answerCallbackQuery({ text: t("agent.changed_callback", { name: displayName }) });
-    await ctx.reply(t("agent.changed_message", { name: displayName }), {
-      reply_markup: keyboard,
-    });
+    await ctx.reply(t("agent.changed_message", { name: displayName }));
 
-    // Delete the inline menu message
     await ctx.deleteMessage().catch(() => {});
 
     return true;

@@ -31,6 +31,7 @@ export const fr: I18nDictionary = {
   "cmd.description.memory_export": "Exporter la mémoire en fichiers markdown",
   "cmd.description.memory_reembed": "Recalculer les embeddings de la mémoire vectorielle",
   "cmd.description.inline_facts": "Nombre de faits récents injectés au démarrage de session",
+  "cmd.description.settings": "Paramètres rapides (agent, modèle, variante, contexte)",
   "cmd.description.help": "Aide",
 
   "callback.unknown_command": "Commande inconnue",
@@ -70,9 +71,9 @@ export const fr: I18nDictionary = {
   "common.unknown_error": "erreur inconnue",
 
   "start.welcome":
-    "👋 Bienvenue dans Opencode-Assistant !\n\nUtilisez les commandes :\n/projects — sélectionner un projet\n/sessions — liste des sessions\n/new — nouvelle session\n/commands — commandes personnalisées\n/listskill — lister les skills\n/task — tâche planifiée\n/tasklist — tâches planifiées\n/status — statut\n/help — aide\n\nUtilisez les boutons du bas pour choisir l'agent, le modèle et la variante.",
+    "👋 Bienvenue dans Opencode-Assistant !\n\nUtilisez les commandes :\n/projects — sélectionner un projet\n/sessions — liste des sessions\n/new — nouvelle session\n/commands — commandes personnalisées\n/listskill — lister les skills\n/task — tâche planifiée\n/tasklist — tâches planifiées\n/settings — paramètres rapides\n/status — statut\n/help — aide",
   "help.keyboard_hint":
-    "💡 Utilisez les boutons du bas pour l'agent, le modèle, la variante et les actions de contexte.",
+    "💡 Utilisez /settings pour changer l'agent, le modèle, la variante et compacter le contexte.",
   "help.text":
     "📖 **Aide**\n\n/status - Vérifier l'état du serveur\n/sessions - Liste des sessions\n/new - Créer une nouvelle session\n/help - Aide",
 
@@ -414,12 +415,11 @@ export const fr: I18nDictionary = {
   "question.summary.question": "Question {index} :\n{question}\n\n",
   "question.summary.answer": "Réponse :\n{answer}\n\n",
 
-  "keyboard.agent_mode": "{emoji} {name} Agent",
-  "keyboard.context": "📊 {used} / {limit} ({percent}%)",
-  "keyboard.context_empty": "📊 0",
-  "keyboard.variant": "💭 {name}",
-  "keyboard.variant_default": "💡 Par défaut",
-  "keyboard.updated": "⌨️ Clavier mis à jour",
+  "settings.select": "⚙️ Paramètres rapides — choisis une option :",
+  "settings.button.agent": "🤖 Agent",
+  "settings.button.model": "🧠 Modèle",
+  "settings.button.variant": "💭 Variante",
+  "settings.button.context": "📊 Compacter le contexte",
 
   "pinned.default_session_title": "nouvelle session",
   "pinned.unknown": "Inconnu",

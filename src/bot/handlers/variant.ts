@@ -4,14 +4,9 @@ import {
   getCurrentVariant,
   setCurrentVariant,
   formatVariantForDisplay,
-  formatVariantForButton,
 } from "../../variant/manager.js";
 import { getStoredModel } from "../../model/manager.js";
-import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
 import { logger } from "../../utils/logger.js";
-import { keyboardManager } from "../../keyboard/manager.js";
-import { pinnedMessageManager } from "../../pinned/manager.js";
-import { createMainKeyboard } from "../utils/keyboard.js";
 import {
   clearActiveInlineMenu,
   ensureActiveInlineMenu,
@@ -39,18 +34,8 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
   logger.debug(`[VariantHandler] Received callback: ${callbackQuery.data}`);
 
   try {
-    if (ctx.chat) {
-      keyboardManager.initialize(ctx.api, ctx.chat.id);
-    }
-
-    if (pinnedMessageManager.getContextLimit() === 0) {
-      await pinnedMessageManager.refreshContextLimit();
-    }
-
-    // Parse callback data: "variant:variantId"
     const variantId = callbackQuery.data.replace("variant:", "");
 
-    // Get current model
     const currentModel = getStoredModel();
 
     if (!currentModel.providerID || !currentModel.modelID) {
@@ -59,49 +44,15 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
       return false;
     }
 
-    // Set variant
     setCurrentVariant(variantId);
 
-    // Re-read model after variant update
-    const updatedModel = getStoredModel();
-
-    // Update keyboard manager state
-    keyboardManager.updateModel(updatedModel);
-    keyboardManager.updateVariant(variantId);
-
-    // Build keyboard with correct context info
-    const currentAgent = await resolveProjectAgent(getStoredAgent());
-    const contextInfo =
-      pinnedMessageManager.getContextInfo() ??
-      (pinnedMessageManager.getContextLimit() > 0
-        ? { tokensUsed: 0, tokensLimit: pinnedMessageManager.getContextLimit() }
-        : null);
-
-    keyboardManager.updateAgent(currentAgent);
-
-    if (contextInfo) {
-      keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
-    }
-
-    const variantName = formatVariantForButton(variantId);
-    const keyboard = createMainKeyboard(
-      currentAgent,
-      updatedModel,
-      contextInfo ?? undefined,
-      variantName,
-    );
-
-    // Send confirmation message with updated keyboard
     const displayName = formatVariantForDisplay(variantId);
 
     clearActiveInlineMenu("variant_selected");
 
     await ctx.answerCallbackQuery({ text: t("variant.changed_callback", { name: displayName }) });
-    await ctx.reply(t("variant.changed_message", { name: displayName }), {
-      reply_markup: keyboard,
-    });
+    await ctx.reply(t("variant.changed_message", { name: displayName }));
 
-    // Delete the inline menu message
     await ctx.deleteMessage().catch(() => {});
 
     return true;

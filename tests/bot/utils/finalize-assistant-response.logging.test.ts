@@ -33,7 +33,6 @@ describe("bot/utils/finalize-assistant-response logging", () => {
           source: "plain" as const,
         },
       ]),
-      getReplyKeyboard: vi.fn(() => undefined),
       sendRenderedPart: vi.fn().mockResolvedValue(undefined),
     });
 

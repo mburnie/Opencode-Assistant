@@ -287,12 +287,10 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
 
     logger.info(`[Bot] Project selected: ${projectName} (id: ${projectId})`);
 
-    const keyboard = await switchToProject(ctx, selectedProject, "project_switched");
+    await switchToProject(ctx, selectedProject, "project_switched");
 
     await ctx.answerCallbackQuery();
-    await ctx.reply(t("projects.selected", { project: projectName }), {
-      reply_markup: keyboard,
-    });
+    await ctx.reply(t("projects.selected", { project: projectName }));
 
     await ctx.deleteMessage();
   } catch (error) {

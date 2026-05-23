@@ -53,6 +53,7 @@ const COMMAND_DEFINITIONS: BotCommandI18nDefinition[] = [
   { command: "skill_update", descriptionKey: "cmd.description.skill_update" },
   { command: "skill_verify", descriptionKey: "cmd.description.skill_verify" },
   { command: "skill_remove", descriptionKey: "cmd.description.skill_remove" },
+  { command: "settings", descriptionKey: "cmd.description.settings" },
   { command: "help", descriptionKey: "cmd.description.help" },
 ];
 

@@ -15,11 +15,7 @@ const mocked = vi.hoisted(() => ({
   setCurrentSessionMock: vi.fn(),
   clearSummaryMock: vi.fn(),
   clearInteractionMock: vi.fn(),
-  keyboardInitializeMock: vi.fn(),
-  keyboardGetKeyboardMock: vi.fn(() => ({ inline_keyboard: [] })),
-  keyboardUpdateAgentMock: vi.fn(),
-  keyboardUpdateContextMock: vi.fn(),
-  keyboardGetContextInfoMock: vi.fn(() => null),
+
   pinnedIsInitializedMock: vi.fn(() => false),
   pinnedInitializeMock: vi.fn(),
   pinnedOnSessionChangeMock: vi.fn(),
@@ -55,16 +51,6 @@ vi.mock("../../../src/summary/aggregator.js", () => ({
 
 vi.mock("../../../src/interaction/cleanup.js", () => ({
   clearAllInteractionState: mocked.clearInteractionMock,
-}));
-
-vi.mock("../../../src/keyboard/manager.js", () => ({
-  keyboardManager: {
-    initialize: mocked.keyboardInitializeMock,
-    getKeyboard: mocked.keyboardGetKeyboardMock,
-    getContextInfo: mocked.keyboardGetContextInfoMock,
-    updateAgent: mocked.keyboardUpdateAgentMock,
-    updateContext: mocked.keyboardUpdateContextMock,
-  },
 }));
 
 vi.mock("../../../src/agent/manager.js", () => ({
@@ -173,13 +159,7 @@ describe("bot/commands/sessions", () => {
     mocked.setCurrentSessionMock.mockReset();
     mocked.clearSummaryMock.mockReset();
     mocked.clearInteractionMock.mockReset();
-    mocked.keyboardInitializeMock.mockReset();
-    mocked.keyboardGetKeyboardMock.mockReset();
-    mocked.keyboardGetKeyboardMock.mockReturnValue({ inline_keyboard: [] });
-    mocked.keyboardGetContextInfoMock.mockReset();
-    mocked.keyboardGetContextInfoMock.mockReturnValue(null);
-    mocked.keyboardUpdateAgentMock.mockReset();
-    mocked.keyboardUpdateContextMock.mockReset();
+
     mocked.pinnedIsInitializedMock.mockReset();
     mocked.pinnedIsInitializedMock.mockReturnValue(false);
     mocked.pinnedInitializeMock.mockReset();
@@ -362,7 +342,7 @@ describe("bot/commands/sessions", () => {
 
     expect(handled).toBe(true);
     expect(mocked.resolveProjectAgentMock).toHaveBeenCalledOnce();
-    expect(mocked.keyboardUpdateAgentMock).toHaveBeenCalledWith("plan");
+
     expect(mocked.attachToSessionMock).toHaveBeenCalledWith({
       bot: expect.any(Object),
       chatId: 111,

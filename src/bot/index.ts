@@ -11,11 +11,6 @@ import { BOT_COMMANDS } from "./commands/definitions.js";
 import { startCommand } from "./commands/start.js";
 import { helpCommand } from "./commands/help.js";
 import { statusCommand } from "./commands/status.js";
-import {
-  AGENT_MODE_BUTTON_TEXT_PATTERN,
-  MODEL_BUTTON_TEXT_PATTERN,
-  VARIANT_BUTTON_TEXT_PATTERN,
-} from "./message-patterns.js";
 import { sessionsCommand, handleSessionSelect } from "./commands/sessions.js";
 import { newCommand } from "./commands/new.js";
 import { projectsCommand, handleProjectSelect } from "./commands/projects.js";
@@ -25,6 +20,7 @@ import { abortCommand } from "./commands/abort.js";
 import { opencodeStartCommand } from "./commands/opencode-start.js";
 import { opencodeStopCommand } from "./commands/opencode-stop.js";
 import { renameCommand, handleRenameCancel, handleRenameTextAnswer } from "./commands/rename.js";
+import { settingsCommand, handleSettingsSelect } from "./commands/settings.js";
 import { handleTaskCallback, handleTaskTextInput, taskCommand } from "./commands/task.js";
 import { handleTaskListCallback, taskListCommand } from "./commands/tasklist.js";
 import { handleCronDeliveryCallback } from "../cron/delivery-handler.js";
@@ -39,19 +35,14 @@ import { registerMemoryCommands } from "./commands/memory-commands.js";
 import { clearSessionTracker } from "../memory/session-tracker.js";
 import { handleQuestionCallback, handleQuestionTextAnswer } from "./handlers/question.js";
 import { handlePermissionCallback } from "./handlers/permission.js";
-import { handleAgentSelect, showAgentSelectionMenu } from "./handlers/agent.js";
-import {
-  handleModelApiKeyInput,
-  handleModelSelect,
-  showModelSelectionMenu,
-} from "./handlers/model.js";
-import { handleVariantSelect, showVariantSelectionMenu } from "./handlers/variant.js";
-import { handleContextButtonPress, handleCompactConfirm } from "./handlers/context.js";
+import { handleAgentSelect } from "./handlers/agent.js";
+import { handleModelApiKeyInput, handleModelSelect } from "./handlers/model.js";
+import { handleVariantSelect } from "./handlers/variant.js";
+import { handleCompactConfirm } from "./handlers/context.js";
 import { handleInlineMenuCancel } from "./handlers/inline-menu.js";
 import { questionManager } from "../question/manager.js";
 import { interactionManager } from "../interaction/manager.js";
 import { clearAllInteractionState } from "../interaction/cleanup.js";
-import { keyboardManager } from "../keyboard/manager.js";
 import { stopEventListening } from "../opencode/events.js";
 import { summaryAggregator } from "../summary/aggregator.js";
 import { logger } from "../utils/logger.js";
@@ -91,14 +82,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const TEMP_DIR = path.join(__dirname, "..", ".tmp");
 
-function getCurrentReplyKeyboard() {
-  if (!keyboardManager.isInitialized()) {
-    return undefined;
-  }
-
-  return keyboardManager.getKeyboard();
-}
-
 function prepareStreamingPayload(messageText: string): StreamingMessagePayload | null {
   return prepareAssistantStreamingPayload(messageText, RESPONSE_STREAM_TEXT_LIMIT);
 }
@@ -112,7 +95,6 @@ function prepareFinalStreamingPayload(messageText: string): StreamingMessagePayl
 const botContext: BotContext = {
   getBot: () => botInstance,
   getChatId: () => chatIdInstance,
-  getCurrentReplyKeyboard,
 };
 
 const toolMessageBatcher = createToolMessageBatcher({
@@ -255,19 +237,6 @@ export function createBot(): Bot<Context> {
   bot.use(ensureCommandsInitialized);
   bot.use(interactionGuardMiddleware);
 
-  const blockMenuWhileInteractionActive = async (ctx: Context): Promise<boolean> => {
-    const activeInteraction = interactionManager.getSnapshot();
-    if (!activeInteraction) {
-      return false;
-    }
-
-    logger.debug(
-      `[Bot] Blocking menu open while interaction active: kind=${activeInteraction.kind}, expectedInput=${activeInteraction.expectedInput}`,
-    );
-    await ctx.reply(t("interaction.blocked.finish_current"));
-    return true;
-  };
-
   bot.command("start", startCommand);
   bot.command("help", helpCommand);
   bot.command("status", statusCommand);
@@ -285,6 +254,7 @@ export function createBot(): Bot<Context> {
   bot.command("rename", renameCommand);
   bot.command("commands", commandsCommand);
   bot.command("mcplist", mcpsCommand);
+  bot.command("settings", settingsCommand);
 
   // Memory commands: /soul, /memory, /context, /memfiles, /listskill, /skill
   registerMemoryCommands(bot);
@@ -321,13 +291,14 @@ export function createBot(): Bot<Context> {
       const handledRenameCancel = await handleRenameCancel(ctx);
       const handledCommands = await handleCommandsCallback(ctx, { bot, ensureEventSubscription });
       const handledMcps = await handleMcpsCallback(ctx);
+      const handledSettings = await handleSettingsSelect(ctx);
       const handledCronDelivery = await handleCronDeliveryCallback(ctx, {
         bot,
         ensureEventSubscription,
       });
 
       logger.debug(
-        `[Bot] Callback handled: inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, worktree=${handledWorktree}, open=${handledOpen}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, task=${handledTask}, taskList=${handledTaskList}, rename=${handledRenameCancel}, commands=${handledCommands}, mcps=${handledMcps}, cronDelivery=${handledCronDelivery}`,
+        `[Bot] Callback handled: inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, worktree=${handledWorktree}, open=${handledOpen}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, task=${handledTask}, taskList=${handledTaskList}, rename=${handledRenameCancel}, commands=${handledCommands}, mcps=${handledMcps}, settings=${handledSettings}, cronDelivery=${handledCronDelivery}`,
       );
 
       if (
@@ -347,6 +318,7 @@ export function createBot(): Bot<Context> {
         !handledRenameCancel &&
         !handledCommands &&
         !handledMcps &&
+        !handledSettings &&
         !handledCronDelivery
       ) {
         logger.debug("Unknown callback query:", ctx.callbackQuery?.data);
@@ -356,72 +328,6 @@ export function createBot(): Bot<Context> {
       logger.error("[Bot] Error handling callback:", err);
       clearAllInteractionState("callback_handler_error");
       await ctx.answerCallbackQuery({ text: t("callback.processing_error") }).catch(() => {});
-    }
-  });
-
-  // Handle Reply Keyboard button press (agent indicator)
-  bot.hears(AGENT_MODE_BUTTON_TEXT_PATTERN, async (ctx) => {
-    logger.debug(`[Bot] Agent button pressed: ${ctx.message?.text}`);
-
-    try {
-      if (await blockMenuWhileInteractionActive(ctx)) {
-        return;
-      }
-
-      await showAgentSelectionMenu(ctx);
-    } catch (err) {
-      logger.error("[Bot] Error showing agent menu:", err);
-      await ctx.reply(t("error.load_agents"));
-    }
-  });
-
-  // Handle Reply Keyboard button press (model selector)
-  // Model button text is produced by formatModelForButton() and always starts with "🤖 ".
-  bot.hears(MODEL_BUTTON_TEXT_PATTERN, async (ctx) => {
-    logger.debug(`[Bot] Model button pressed: ${ctx.message?.text}`);
-
-    try {
-      if (await blockMenuWhileInteractionActive(ctx)) {
-        return;
-      }
-
-      await showModelSelectionMenu(ctx);
-    } catch (err) {
-      logger.error("[Bot] Error showing model menu:", err);
-      await ctx.reply(t("error.load_models"));
-    }
-  });
-
-  // Handle Reply Keyboard button press (context button)
-  bot.hears(/^📊(?:\s|$)/, async (ctx) => {
-    logger.debug(`[Bot] Context button pressed: ${ctx.message?.text}`);
-
-    try {
-      if (await blockMenuWhileInteractionActive(ctx)) {
-        return;
-      }
-
-      await handleContextButtonPress(ctx);
-    } catch (err) {
-      logger.error("[Bot] Error handling context button:", err);
-      await ctx.reply(t("error.context_button"));
-    }
-  });
-
-  // Handle Reply Keyboard button press (variant selector)
-  // Keep support for both legacy "💭" and current "💡" prefix.
-  bot.hears(VARIANT_BUTTON_TEXT_PATTERN, async (ctx) => {
-    logger.debug(`[Bot] Variant button pressed: ${ctx.message?.text}`);
-
-    try {
-      if (await blockMenuWhileInteractionActive(ctx)) {
-        return;
-      }
-
-      await showVariantSelectionMenu(ctx);
-    } catch (err) {
-      logger.error("[Bot] Error showing variant menu:", err);
-      await ctx.reply(t("error.load_variants"));
     }
   });
 

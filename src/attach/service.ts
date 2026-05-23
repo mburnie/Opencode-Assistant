@@ -3,7 +3,6 @@ import { opencodeClient } from "../opencode/client.js";
 import { stopEventListening } from "../opencode/events.js";
 import { summaryAggregator } from "../summary/aggregator.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
-import { keyboardManager } from "../keyboard/manager.js";
 import { questionManager } from "../question/manager.js";
 import { permissionManager } from "../permission/manager.js";
 import { showCurrentQuestion } from "../bot/handlers/question.js";
@@ -58,8 +57,6 @@ async function ensureAttachPinnedSession({
     pinnedMessageManager.initialize(api, chatId);
   }
 
-  keyboardManager.initialize(api, chatId);
-
   const pinnedState = pinnedMessageManager.getState();
   if (pinnedState.sessionId === session.id && pinnedState.messageId) {
     return;
@@ -72,11 +69,6 @@ async function ensureAttachPinnedSession({
   }
 
   await pinnedMessageManager.loadContextFromHistory(session.id, session.directory);
-
-  const contextInfo = pinnedMessageManager.getContextInfo();
-  if (contextInfo) {
-    keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
-  }
 }
 
 async function syncPinnedAttachState(): Promise<void> {

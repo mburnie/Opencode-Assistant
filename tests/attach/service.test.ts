@@ -31,8 +31,7 @@ const mocked = vi.hoisted(() => ({
   pinnedLoadContextFromHistoryMock: vi.fn(),
   pinnedGetContextInfoMock: vi.fn(() => null),
   pinnedSetAttachStateMock: vi.fn(),
-  keyboardInitializeMock: vi.fn(),
-  keyboardUpdateContextMock: vi.fn(),
+
   showCurrentQuestionMock: vi.fn(),
   showPermissionRequestMock: vi.fn(),
   ensureEventSubscriptionMock: vi.fn(),
@@ -78,13 +77,6 @@ vi.mock("../../src/pinned/manager.js", () => ({
     loadContextFromHistory: mocked.pinnedLoadContextFromHistoryMock,
     getContextInfo: mocked.pinnedGetContextInfoMock,
     setAttachState: mocked.pinnedSetAttachStateMock,
-  },
-}));
-
-vi.mock("../../src/keyboard/manager.js", () => ({
-  keyboardManager: {
-    initialize: mocked.keyboardInitializeMock,
-    updateContext: mocked.keyboardUpdateContextMock,
   },
 }));
 
@@ -151,8 +143,7 @@ describe("attach/service", () => {
     mocked.pinnedGetContextInfoMock.mockReturnValue(null);
     mocked.pinnedSetAttachStateMock.mockReset();
     mocked.pinnedSetAttachStateMock.mockResolvedValue(undefined);
-    mocked.keyboardInitializeMock.mockReset();
-    mocked.keyboardUpdateContextMock.mockReset();
+
     mocked.showCurrentQuestionMock.mockReset();
     mocked.showCurrentQuestionMock.mockResolvedValue(undefined);
     mocked.showPermissionRequestMock.mockReset();

@@ -5,11 +5,6 @@ import { setCurrentSession, SessionInfo } from "../../session/manager.js";
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
-import { keyboardManager } from "../../keyboard/manager.js";
-import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
-import { getStoredModel } from "../../model/manager.js";
-import { formatVariantForButton } from "../../variant/manager.js";
-import { createMainKeyboard } from "../utils/keyboard.js";
 import { isForegroundBusy, replyBusyBlocked } from "../utils/busy-guard.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -64,22 +59,7 @@ export async function newCommand(ctx: CommandContext<Context>, deps: NewCommandD
       ensureEventSubscription: deps.ensureEventSubscription,
     });
 
-    // Get current state for keyboard
-    const currentAgent = await resolveProjectAgent(getStoredAgent());
-    const currentModel = getStoredModel();
-    keyboardManager.updateAgent(currentAgent);
-    const contextInfo = keyboardManager.getContextInfo();
-    const variantName = formatVariantForButton(currentModel.variant || "default");
-    const keyboard = createMainKeyboard(
-      currentAgent,
-      currentModel,
-      contextInfo ?? undefined,
-      variantName,
-    );
-
-    await ctx.reply(t("new.created", { title: session.title }), {
-      reply_markup: keyboard,
-    });
+    await ctx.reply(t("new.created", { title: session.title }));
   } catch (error) {
     logger.error("[Bot] Error creating session:", error);
     await ctx.reply(t("new.create_error"));
