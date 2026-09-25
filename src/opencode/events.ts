@@ -1,14 +1,14 @@
-import { opencodeClient } from "./client.js";
-import { Event } from "@opencode-ai/sdk/v2";
+import { opencodeClientV2 } from "./client-v2.js";
+import type { V2Event } from "@opencode/client/promise";
 import { logger } from "../utils/logger.js";
 
-type EventCallback = (event: Event) => void;
+type EventCallback = (event: V2Event) => void;
 
 const RECONNECT_BASE_DELAY_MS = 1000;
 const RECONNECT_MAX_DELAY_MS = 15000;
 const FATAL_NO_STREAM_ERROR = "No stream returned from event subscription";
 
-let eventStream: AsyncGenerator<Event, unknown, unknown> | null = null;
+let eventStream: AsyncIterator<V2Event> | null = null;
 let eventCallback: EventCallback | null = null;
 let isListening = false;
 let activeDirectory: string | null = null;
@@ -70,22 +70,25 @@ export async function subscribeToEvents(directory: string, callback: EventCallba
 
     while (isListening && activeDirectory === directory && !controller.signal.aborted) {
       try {
-        const result = await opencodeClient.event.subscribe(
-          { directory },
-          { signal: controller.signal },
-        );
+        const stream = opencodeClientV2.event.subscribe({
+          signal: controller.signal,
+        });
 
-        if (!result.stream) {
+        if (!stream || typeof stream[Symbol.asyncIterator] !== "function") {
           throw new Error(FATAL_NO_STREAM_ERROR);
         }
 
         reconnectAttempt = 0;
-        eventStream = result.stream;
+        eventStream = stream[Symbol.asyncIterator]();
 
-        for await (const event of eventStream) {
+        for await (const event of stream) {
           if (!isListening || activeDirectory !== directory || controller.signal.aborted) {
             logger.debug(`Event listener stopped or changed directory, breaking loop`);
             break;
+          }
+
+          if (event.location && event.location.directory !== directory) {
+            continue;
           }
 
           // CRITICAL: Explicitly yield to the event loop BEFORE processing the event

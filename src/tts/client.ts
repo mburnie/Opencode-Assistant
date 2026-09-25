@@ -157,7 +157,7 @@ async function synthesizeWithOpenAi(text: string, voice: string): Promise<TtsRes
 }
 
 /**
- * Speechify TTS — uses the official @speechify/api SDK.
+ * Speechify TTS — calls the Speechify HTTP API directly.
  * Response comes as Base64-encoded audio in a JSON body.
  * Free tier: 50,000 characters/month.
  */

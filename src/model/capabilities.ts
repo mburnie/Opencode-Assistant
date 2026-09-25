@@ -1,9 +1,14 @@
-import { opencodeClient } from "../opencode/client.js";
+import { listProvidersWithModels } from "../opencode/client-v2.js";
 import { logger } from "../utils/logger.js";
-import type { Model } from "@opencode-ai/sdk/v2";
+
+export interface ModelCapabilities {
+  tools: boolean;
+  input: string[];
+  output: string[];
+}
 
 interface ModelCapabilitiesCache {
-  [key: string]: Model["capabilities"] | null;
+  [key: string]: ModelCapabilities | null;
 }
 
 const capabilitiesCache: ModelCapabilitiesCache = {};
@@ -15,7 +20,7 @@ const capabilitiesCache: ModelCapabilitiesCache = {};
 export async function getModelCapabilities(
   providerID: string,
   modelID: string,
-): Promise<Model["capabilities"] | null> {
+): Promise<ModelCapabilities | null> {
   const cacheKey = `${providerID}/${modelID}`;
 
   if (capabilitiesCache[cacheKey] !== undefined) {
@@ -25,16 +30,15 @@ export async function getModelCapabilities(
 
   try {
     logger.debug(`[ModelCapabilities] Fetching capabilities for ${cacheKey}`);
-    const response = await opencodeClient.config.providers();
+    const { data: providersData, error } = await listProvidersWithModels();
 
-    if (response.error || !response.data) {
-      logger.error("[ModelCapabilities] API returned error:", response.error);
+    if (error || !providersData) {
+      logger.error("[ModelCapabilities] API returned error:", error);
       capabilitiesCache[cacheKey] = null;
       return null;
     }
 
-    const providers = response.data.providers;
-    const provider = providers.find((p) => p.id === providerID);
+    const provider = providersData.find((p) => p.id === providerID);
 
     if (!provider) {
       logger.warn(`[ModelCapabilities] Provider ${providerID} not found`);
@@ -64,23 +68,23 @@ export async function getModelCapabilities(
  * Check if model supports a specific input type
  */
 export function supportsInput(
-  capabilities: Model["capabilities"] | null,
-  inputType: "image" | "pdf" | "audio" | "video",
+  capabilities: ModelCapabilities | null,
+  inputType: "image" | "pdf" | "audio" | "video" | string,
 ): boolean {
   if (!capabilities) {
     return false;
   }
 
-  return capabilities.input[inputType] === true;
+  return capabilities.input.includes(inputType);
 }
 
 /**
  * Check if model supports attachments in general
  */
-export function supportsAttachment(capabilities: Model["capabilities"] | null): boolean {
+export function supportsAttachment(capabilities: ModelCapabilities | null): boolean {
   if (!capabilities) {
     return false;
   }
 
-  return capabilities.attachment === true;
+  return capabilities.input.some((input) => input === "pdf" || input === "image");
 }

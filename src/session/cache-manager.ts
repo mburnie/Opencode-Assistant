@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { opencodeClient } from "../opencode/client.js";
+import { listSessions } from "../opencode/client-v2.js";
 import { getSessionDirectoryCache, setSessionDirectoryCache } from "../settings/manager.js";
 import { logger } from "../utils/logger.js";
 
@@ -191,16 +191,17 @@ function upsertDirectory(worktree: string, lastUpdated: number): boolean {
   return true;
 }
 
-function buildListParams(): { limit: number; start?: number } {
+function buildListParams(): { limit: number; order: "asc" | "desc"; updatedAfter?: number } {
   const hasWatermark = cacheData.lastSyncedUpdatedAt > 0;
 
   if (!hasWatermark) {
-    return { limit: INITIAL_WARMUP_LIMIT };
+    return { limit: INITIAL_WARMUP_LIMIT, order: "desc" };
   }
 
   return {
     limit: INCREMENTAL_SYNC_LIMIT,
-    start: Math.max(0, cacheData.lastSyncedUpdatedAt - SYNC_SAFETY_WINDOW_MS),
+    order: "desc",
+    updatedAfter: Math.max(0, cacheData.lastSyncedUpdatedAt - SYNC_SAFETY_WINDOW_MS),
   };
 }
 
@@ -276,17 +277,25 @@ async function runSync(): Promise<void> {
   await ensureCacheLoaded();
 
   const params = buildListParams();
-  const { data: sessions, error } = await opencodeClient.session.list(params);
+  const { data: response, error } = await listSessions({
+    limit: params.limit,
+    order: params.order,
+  });
 
-  if (error || !sessions) {
+  if (error || !response) {
     throw error || new Error("No session list received from server");
   }
 
   let changed = false;
   let maxUpdated = cacheData.lastSyncedUpdatedAt;
 
-  for (const session of sessions) {
+  for (const session of response) {
     const updatedAt = session.time?.updated ?? Date.now();
+
+    if (params.updatedAfter !== undefined && updatedAt <= params.updatedAfter) {
+      continue;
+    }
+
     if (upsertDirectory(session.directory, updatedAt)) {
       changed = true;
     }
@@ -306,7 +315,7 @@ async function runSync(): Promise<void> {
   }
 
   logger.debug(
-    `[SessionCache] Synced sessions: fetched=${sessions.length}, directories=${cacheData.directories.length}, lastSyncedUpdatedAt=${cacheData.lastSyncedUpdatedAt}`,
+    `[SessionCache] Synced sessions: fetched=${response.length}, directories=${cacheData.directories.length}, lastSyncedUpdatedAt=${cacheData.lastSyncedUpdatedAt}`,
   );
 }
 
@@ -332,36 +341,13 @@ function getStorageRootCandidates(pathInfo: { home?: string; state?: string }): 
   return Array.from(candidates);
 }
 
-function getPathApi():
-  | {
-      get?: () => Promise<{
-        data?: { home?: string; state?: string };
-        error?: unknown;
-      }>;
-    }
-  | undefined {
-  return opencodeClient.path as
-    | {
-        get?: () => Promise<{
-          data?: { home?: string; state?: string };
-          error?: unknown;
-        }>;
-      }
-    | undefined;
-}
-
 async function getStorageRootsFromApi(): Promise<string[]> {
-  const pathApi = getPathApi();
-  if (!pathApi?.get) {
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  if (!homeDir) {
     return [];
   }
 
-  const { data: pathInfo, error } = await pathApi.get();
-  if (error || !pathInfo) {
-    return [];
-  }
-
-  return getStorageRootCandidates(pathInfo);
+  return getStorageRootCandidates({ home: homeDir });
 }
 
 async function querySessionDirectoriesFromSqlite(

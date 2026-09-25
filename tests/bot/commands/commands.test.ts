@@ -60,17 +60,11 @@ vi.mock("../../../src/session/cache-manager.js", () => ({
   __resetSessionDirectoryCacheForTests: vi.fn(),
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    command: {
-      list: mocked.commandListMock,
-    },
-    session: {
-      status: mocked.sessionStatusMock,
-      create: mocked.sessionCreateMock,
-      command: mocked.sessionCommandMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  listCommands: mocked.commandListMock,
+  getActiveSessions: mocked.sessionStatusMock,
+  createSession: mocked.sessionCreateMock,
+  commandSession: mocked.sessionCommandMock,
 }));
 
 vi.mock("../../../src/summary/aggregator.js", () => ({
@@ -219,7 +213,7 @@ describe("bot/commands/commands", () => {
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
       alreadyAttached: false,
-      restoredQuestion: false,
+      restoredForm: false,
       restoredPermissions: 0,
     });
 
@@ -246,7 +240,7 @@ describe("bot/commands/commands", () => {
     const ctx = createCommandContext(123);
     await commandsCommand(ctx as never);
 
-    expect(mocked.commandListMock).toHaveBeenCalledWith({ directory: "D:/Projects/Repo" });
+    expect(mocked.commandListMock).toHaveBeenCalledWith("D:/Projects/Repo");
     expect(ctx.reply).toHaveBeenCalledTimes(1);
 
     const [, options] = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0] as [
@@ -334,12 +328,14 @@ describe("bot/commands/commands", () => {
     expect(mocked.suppressionRegisterMock).toHaveBeenCalledWith("session-1", "/poem");
     expect(mocked.sessionCommandMock).toHaveBeenCalledWith({
       sessionID: "session-1",
-      directory: "D:\\Projects\\Repo",
-      command: "poem",
-      arguments: "",
+      name: "poem",
+      text: "",
       agent: "build",
-      model: "openai/gpt-5",
-      variant: "default",
+      model: {
+        providerID: "openai",
+        modelID: "gpt-5",
+        variant: "default",
+      },
     });
   });
 
@@ -375,12 +371,14 @@ describe("bot/commands/commands", () => {
     );
     expect(mocked.sessionCommandMock).toHaveBeenCalledWith({
       sessionID: "session-1",
-      directory: "D:\\Projects\\Repo",
-      command: "poem",
-      arguments: "about spring",
+      name: "poem",
+      text: "about spring",
       agent: "build",
-      model: "openai/gpt-5",
-      variant: "default",
+      model: {
+        providerID: "openai",
+        modelID: "gpt-5",
+        variant: "default",
+      },
     });
   });
 
@@ -423,7 +421,7 @@ describe("bot/commands/commands", () => {
     const ctx = createCommandContext(700);
     await commandsCommand(ctx as never);
 
-    expect(mocked.commandListMock).toHaveBeenCalledWith({ directory: "D:/Projects/Repo" });
+    expect(mocked.commandListMock).toHaveBeenCalledWith("D:/Projects/Repo");
 
     const [, options] = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
@@ -463,7 +461,9 @@ describe("bot/commands/commands", () => {
 
     expect(options.reply_markup.inline_keyboard[0]?.[0]?.callback_data).toBe("commands:select:0");
     expect(options.reply_markup.inline_keyboard[1]?.[0]?.callback_data).toBe("commands:select:1");
-    expect(options.reply_markup.inline_keyboard[2]?.[0]?.callback_data).toBe("commands:cancel");
+    expect(options.reply_markup.inline_keyboard[2]?.[0]?.callback_data).toBe("commands:select:2");
+    expect(options.reply_markup.inline_keyboard[3]?.[0]?.callback_data).toBe("commands:select:3");
+    expect(options.reply_markup.inline_keyboard[4]?.[0]?.callback_data).toBe("commands:cancel");
 
     const state = interactionManager.getSnapshot();
     expect(state?.kind).toBe("custom");
@@ -472,6 +472,8 @@ describe("bot/commands/commands", () => {
     expect(state?.metadata.commands).toEqual([
       { name: "init", description: "create/update AGENTS.md" },
       { name: "review", description: "review changes" },
+      { name: "borsch", description: "Borsch recipe" },
+      { name: "from-mcp", description: "MCP prompt" },
     ]);
   });
 

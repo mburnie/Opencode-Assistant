@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { opencodeClient } from "../opencode/client.js";
+import { listProjects, type ProjectListItem } from "../opencode/client-v2.js";
 import { ProjectInfo } from "../settings/manager.js";
 import { getCachedSessionProjects } from "../session/cache-manager.js";
 import { logger } from "../utils/logger.js";
@@ -13,13 +13,13 @@ async function getResolvedProjects(options?: {
   includeLinkedWorktrees?: boolean;
 }): Promise<InternalProject[]> {
   const includeLinkedWorktrees = options?.includeLinkedWorktrees === true;
-  const { data: projects, error } = await opencodeClient.project.list();
+  const { data: projects, error } = await listProjects();
 
   if (error || !projects) {
     throw error || new Error("No data received from server");
   }
 
-  const apiProjects: InternalProject[] = projects.map((project) => ({
+  const apiProjects: InternalProject[] = projects.map((project: ProjectListItem) => ({
     id: project.id,
     worktree: project.worktree,
     name: project.name || project.worktree,

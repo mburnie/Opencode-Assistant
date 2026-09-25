@@ -50,7 +50,9 @@ function createDocumentDeps(overrides: Partial<DocumentHandlerDeps> = {}): {
     filePath: "documents/test.txt",
   });
   const getCapabilitiesMock = vi.fn().mockResolvedValue({
-    input: { pdf: true, image: true },
+    tools: true,
+    input: ["text", "pdf", "image"],
+    output: ["text"],
   });
   const getStoredModelMock = vi.fn().mockReturnValue({
     providerID: "test-provider",
@@ -217,7 +219,9 @@ describe("bot/handlers/document", () => {
       });
       const { deps, processPromptMock } = createDocumentDeps({
         getModelCapabilities: vi.fn().mockResolvedValue({
-          input: { pdf: false },
+          tools: true,
+          input: ["text"],
+          output: ["text"],
         }),
       });
 
@@ -240,7 +244,9 @@ describe("bot/handlers/document", () => {
       });
       const { deps, processPromptMock } = createDocumentDeps({
         getModelCapabilities: vi.fn().mockResolvedValue({
-          input: { pdf: false },
+          tools: true,
+          input: ["text"],
+          output: ["text"],
         }),
       });
 

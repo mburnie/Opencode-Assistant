@@ -5,21 +5,20 @@ const mocked = vi.hoisted(() => ({
   createMock: vi.fn(),
   promptAsyncMock: vi.fn(),
   messagesMock: vi.fn(),
-  statusMock: vi.fn(),
+  activeSessionsMock: vi.fn(),
   deleteMock: vi.fn(),
   loggerWarnMock: vi.fn(),
 }));
 
-vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    session: {
-      create: mocked.createMock,
-      promptAsync: mocked.promptAsyncMock,
-      messages: mocked.messagesMock,
-      status: mocked.statusMock,
-      delete: mocked.deleteMock,
-    },
-  },
+vi.mock("../../src/opencode/client-v2.js", () => ({
+  createSession: mocked.createMock,
+  promptSession: mocked.promptAsyncMock,
+  deleteSession: mocked.deleteMock,
+  getActiveSessions: mocked.activeSessionsMock,
+}));
+
+vi.mock("../../src/opencode/client-v2-messages.js", () => ({
+  listMessages: mocked.messagesMock,
 }));
 
 vi.mock("../../src/config.js", () => ({
@@ -103,7 +102,7 @@ describe("scheduled-task/executor", () => {
     mocked.createMock.mockReset();
     mocked.promptAsyncMock.mockReset();
     mocked.messagesMock.mockReset();
-    mocked.statusMock.mockReset();
+    mocked.activeSessionsMock.mockReset();
     mocked.deleteMock.mockReset();
     mocked.loggerWarnMock.mockReset();
     mocked.deleteMock.mockResolvedValue(undefined);
@@ -125,8 +124,8 @@ describe("scheduled-task/executor", () => {
       data: [createAssistantMessage("Finished successfully", { completed: true })],
       error: null,
     });
-    mocked.statusMock.mockResolvedValueOnce({
-      data: { "session-1": { type: "busy" } },
+    mocked.activeSessionsMock.mockResolvedValueOnce({
+      data: { "session-1": { type: "running" } },
       error: null,
     });
 
@@ -145,14 +144,18 @@ describe("scheduled-task/executor", () => {
     expect(mocked.promptAsyncMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionID: "session-1",
-        directory: "D:\\Projects\\Repo",
+        text: expect.stringContaining("Send report"),
         agent: "build",
-        variant: "default",
+        model: {
+          providerID: "openai",
+          modelID: "gpt-5",
+          variant: "default",
+        },
       }),
     );
-    expect(mocked.statusMock).toHaveBeenCalledTimes(1);
+    expect(mocked.activeSessionsMock).toHaveBeenCalledTimes(1);
     expect(mocked.messagesMock).toHaveBeenCalledTimes(2);
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).toHaveBeenCalledWith("session-1");
   });
 
   it("re-reads messages after idle before returning the assistant result", async () => {
@@ -172,8 +175,8 @@ describe("scheduled-task/executor", () => {
         data: [createAssistantMessage("Final completed output", { completed: true })],
         error: null,
       });
-    mocked.statusMock.mockResolvedValueOnce({
-      data: { "session-1": { type: "idle" } },
+    mocked.activeSessionsMock.mockResolvedValueOnce({
+      data: {},
       error: null,
     });
 
@@ -203,7 +206,7 @@ describe("scheduled-task/executor", () => {
       errorMessage: expect.stringContaining("https://opencode.ai/docs/config/#models"),
     });
     expect(mocked.messagesMock).not.toHaveBeenCalled();
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).toHaveBeenCalledWith("session-1");
   });
 
   it("returns a helpful timeout message when assistant result contains a timeout error", async () => {
@@ -240,8 +243,8 @@ describe("scheduled-task/executor", () => {
     });
     mocked.promptAsyncMock.mockResolvedValueOnce({ data: undefined, error: null });
     mocked.messagesMock.mockResolvedValue({ data: [], error: null });
-    mocked.statusMock.mockResolvedValue({
-      data: { "session-1": { type: "busy" } },
+    mocked.activeSessionsMock.mockResolvedValue({
+      data: { "session-1": { type: "running" } },
       error: null,
     });
 
@@ -257,7 +260,7 @@ describe("scheduled-task/executor", () => {
       resultText: null,
       errorMessage: "Scheduled task exceeded bot execution timeout after 120 minutes.",
     });
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).toHaveBeenCalledWith("session-1");
   });
 
   it("treats an empty completed assistant reply as an execution error", async () => {

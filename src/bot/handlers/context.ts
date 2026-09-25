@@ -1,6 +1,6 @@
 import { Context, InlineKeyboard } from "grammy";
 import { getCurrentSession } from "../../session/manager.js";
-import { opencodeClient } from "../../opencode/client.js";
+import { compactSession } from "../../opencode/client-v2.js";
 import { getStoredModel } from "../../model/manager.js";
 import {
   clearActiveInlineMenu,
@@ -98,13 +98,8 @@ export async function handleCompactConfirm(ctx: Context): Promise<boolean> {
     markCompacting(session.id);
 
     try {
-      // Call summarize API (AI compaction)
-      const { error } = await opencodeClient.session.summarize({
-        sessionID: session.id,
-        directory: session.directory,
-        providerID: storedModel.providerID,
-        modelID: storedModel.modelID,
-      });
+      // Call compact API (AI compaction)
+      const { error } = await compactSession(session.id);
 
       if (error) {
         logger.error("[ContextHandler] Compact failed:", error);

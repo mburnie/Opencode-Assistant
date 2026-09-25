@@ -22,7 +22,7 @@ Functional requirements, features, and development status are in [PRODUCT.md](./
 
 - `grammy` - Telegram Bot API framework (https://grammy.dev/)
 - `@grammyjs/menu` - inline keyboards and menus
-- `@opencode-ai/sdk` - official OpenCode Server SDK
+- `@opencode/client` - official OpenCode Server client (V2 API)
 - `dotenv` - environment variable loading
 
 ### Test dependencies
@@ -232,32 +232,37 @@ Important:
 - Follow Arrange-Act-Assert
 - Use `vi.mock()` for external dependencies
 
-## OpenCode SDK quick reference
+## OpenCode client quick reference
+
+The codebase wraps the official `@opencode/client` package in
+`src/opencode/client-v2.ts` (and `src/opencode/client-v2-messages.ts`). Prefer
+the wrapper helpers over calling the SDK directly:
 
 ```typescript
-import { createOpencodeClient } from "@opencode-ai/sdk";
+import {
+  checkServerHealth,
+  interruptSession,
+  listSessions,
+  promptSession,
+} from "../opencode/client-v2.js";
 
-const client = createOpencodeClient({ baseUrl: "http://localhost:4096" });
-
-await client.global.health();
-
-await client.project.list();
-await client.project.current();
-
-await client.session.list();
-await client.session.create({ body: { title: "My session" } });
-await client.session.prompt({
-  path: { id: "session-id" },
-  body: { parts: [{ type: "text", text: "Implement feature X" }] },
-});
-await client.session.abort({ path: { id: "session-id" } });
-
-const events = await client.event.subscribe();
-for await (const event of events.stream) {
-  // handle SSE event
-}
+const { data, error } = await listSessions({ directory });
+await promptSession({ sessionID: "session-id", text: "Implement feature X" });
+await interruptSession("session-id");
 ```
 
+SSE events are subscribed through `src/opencode/events.ts`, which yields
+`V2Event` objects:
+
+```typescript
+import { subscribeToEvents } from "../opencode/events.js";
+
+await subscribeToEvents(directory, (event) => {
+  // handle V2Event
+});
+```
+
+The low-level client is `opencodeClientV2` from `@opencode/client/promise`.
 Full docs: https://opencode.ai/docs/sdk
 
 ## Workflow

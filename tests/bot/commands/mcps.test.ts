@@ -18,14 +18,10 @@ vi.mock("../../../src/settings/manager.js", () => ({
   getCurrentProject: vi.fn(() => mocked.currentProject),
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    mcp: {
-      status: mocked.mcpStatusMock,
-      connect: mocked.mcpConnectMock,
-      disconnect: mocked.mcpDisconnectMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  listMcpServers: mocked.mcpStatusMock,
+  connectMcpServer: mocked.mcpConnectMock,
+  disconnectMcpServer: mocked.mcpDisconnectMock,
 }));
 
 function createCommandContext(messageId: number): Context {
@@ -86,7 +82,7 @@ describe("bot/commands/mcps", () => {
   });
 
   it("shows empty message when no MCP servers configured", async () => {
-    mocked.mcpStatusMock.mockResolvedValue({ data: {}, error: null });
+    mocked.mcpStatusMock.mockResolvedValue({ data: [], error: null });
 
     const ctx = createCommandContext(101);
     await mcpsCommand(ctx as never);
@@ -96,17 +92,17 @@ describe("bot/commands/mcps", () => {
 
   it("shows MCP servers list and starts custom interaction", async () => {
     mocked.mcpStatusMock.mockResolvedValue({
-      data: {
-        filesystem: { status: "connected" },
-        github: { status: "disabled" },
-      },
+      data: [
+        { name: "filesystem", status: { status: "connected" } },
+        { name: "github", status: { status: "disabled" } },
+      ],
       error: null,
     });
 
     const ctx = createCommandContext(102);
     await mcpsCommand(ctx as never);
 
-    expect(mocked.mcpStatusMock).toHaveBeenCalledWith({ directory: "D:/Projects/Repo" });
+    expect(mocked.mcpStatusMock).toHaveBeenCalledWith("D:/Projects/Repo");
     expect(ctx.reply).toHaveBeenCalledTimes(1);
 
     const [, options] = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0] as [
@@ -169,9 +165,7 @@ describe("bot/commands/mcps", () => {
   it("disables a connected server", async () => {
     mocked.mcpDisconnectMock.mockResolvedValue({ error: null });
     mocked.mcpStatusMock.mockResolvedValue({
-      data: {
-        filesystem: { status: "disabled" },
-      },
+      data: [{ name: "filesystem", status: { status: "disabled" } }],
       error: null,
     });
 
@@ -192,10 +186,7 @@ describe("bot/commands/mcps", () => {
     const handled = await handleMcpsCallback(ctx);
 
     expect(handled).toBe(true);
-    expect(mocked.mcpDisconnectMock).toHaveBeenCalledWith({
-      name: "filesystem",
-      directory: "D:/Projects/Repo",
-    });
+    expect(mocked.mcpDisconnectMock).toHaveBeenCalledWith("filesystem", "D:/Projects/Repo");
 
     const state = interactionManager.getSnapshot();
     expect(state?.metadata.stage).toBe("detail");
@@ -205,9 +196,7 @@ describe("bot/commands/mcps", () => {
   it("enables a disabled server", async () => {
     mocked.mcpConnectMock.mockResolvedValue({ error: null });
     mocked.mcpStatusMock.mockResolvedValue({
-      data: {
-        github: { status: "connected" },
-      },
+      data: [{ name: "github", status: { status: "connected" } }],
       error: null,
     });
 
@@ -228,10 +217,7 @@ describe("bot/commands/mcps", () => {
     const handled = await handleMcpsCallback(ctx);
 
     expect(handled).toBe(true);
-    expect(mocked.mcpConnectMock).toHaveBeenCalledWith({
-      name: "github",
-      directory: "D:/Projects/Repo",
-    });
+    expect(mocked.mcpConnectMock).toHaveBeenCalledWith("github", "D:/Projects/Repo");
 
     const state = interactionManager.getSnapshot();
     expect(state?.metadata.stage).toBe("detail");
@@ -240,9 +226,7 @@ describe("bot/commands/mcps", () => {
 
   it("returns to list view on back button", async () => {
     mocked.mcpStatusMock.mockResolvedValue({
-      data: {
-        filesystem: { status: "connected" },
-      },
+      data: [{ name: "filesystem", status: { status: "connected" } }],
       error: null,
     });
 
@@ -355,9 +339,7 @@ describe("bot/commands/mcps", () => {
   it("keeps callback data short for long MCP server names", async () => {
     const longServerName = "very-long-mcp-server-name-".repeat(5);
     mocked.mcpStatusMock.mockResolvedValue({
-      data: {
-        [longServerName]: { status: "connected" },
-      },
+      data: [{ name: longServerName, status: { status: "connected" } }],
       error: null,
     });
 

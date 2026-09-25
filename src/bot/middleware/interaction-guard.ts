@@ -1,6 +1,10 @@
 import type { Context, NextFunction } from "grammy";
 import { resolveInteractionGuardDecision } from "../../interaction/guard.js";
 import type { BlockReason, InteractionKind } from "../../interaction/types.js";
+import { attachManager } from "../../attach/manager.js";
+import { reconcileAttachedSessionBusyState, reconcileForegroundSessionBusyState } from "../../attach/service.js";
+import { getCurrentSession } from "../../session/manager.js";
+import { foregroundSessionState } from "../../scheduled-task/foreground-state.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 
@@ -44,6 +48,18 @@ function getInteractionBlockedMessage(
     }
   }
 
+  if (interactionKind === "form") {
+    switch (reason) {
+      case "command_not_allowed":
+        return t("form.blocked.command_not_allowed");
+      case "expected_callback":
+      case "expected_command":
+      case "expected_text":
+      default:
+        return t("form.blocked.expected_answer");
+    }
+  }
+
   if (interactionKind === "rename") {
     switch (reason) {
       case "command_not_allowed":
@@ -84,6 +100,22 @@ function getInteractionBlockedMessage(
 }
 
 export async function interactionGuardMiddleware(ctx: Context, next: NextFunction): Promise<void> {
+  // Reconcile a potentially stale local busy flag with OpenCode before deciding.
+  // OpenCode is the source of truth for whether the attached session is running.
+  if (attachManager.isBusy()) {
+    const currentSession = getCurrentSession();
+    if (currentSession) {
+      await reconcileAttachedSessionBusyState(currentSession.id);
+    }
+  }
+
+  // Same for the foreground/scheduled-task run state: it is normally cleared
+  // by SSE idle events, but lost events would otherwise leave input blocked
+  // with a "session busy" message even though nothing is running.
+  if (foregroundSessionState.isBusy()) {
+    await reconcileForegroundSessionBusyState();
+  }
+
   const decision = resolveInteractionGuardDecision(ctx);
 
   if (decision.allow) {

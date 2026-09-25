@@ -11,7 +11,6 @@ const mocked = vi.hoisted(() => ({
     directory: "D:\\Projects\\Repo",
   } as { id: string; title: string; directory: string } | null,
   sessionStatusMock: vi.fn(),
-  sessionPromptMock: vi.fn(),
   sessionPromptAsyncMock: vi.fn(),
   sessionCreateMock: vi.fn(),
   suppressionRegisterMock: vi.fn(),
@@ -19,17 +18,13 @@ const mocked = vi.hoisted(() => ({
   setSessionSummaryMock: vi.fn(),
   setBotAndChatIdMock: vi.fn(),
   attachToSessionMock: vi.fn(),
+  isFreeModelMock: vi.fn(),
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    session: {
-      status: mocked.sessionStatusMock,
-      prompt: mocked.sessionPromptMock,
-      promptAsync: mocked.sessionPromptAsyncMock,
-      create: mocked.sessionCreateMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  getActiveSessions: mocked.sessionStatusMock,
+  promptSession: mocked.sessionPromptAsyncMock,
+  createSession: mocked.sessionCreateMock,
 }));
 
 vi.mock("../../../src/session/manager.js", () => ({
@@ -59,6 +54,7 @@ vi.mock("../../../src/model/manager.js", () => ({
     modelID: "gpt-5",
     variant: "default",
   })),
+  isFreeModel: mocked.isFreeModelMock,
 }));
 
 vi.mock("../../../src/pinned/manager.js", () => ({
@@ -175,7 +171,6 @@ describe("bot/handlers/prompt", () => {
       directory: "D:\\Projects\\Repo",
     };
     mocked.sessionStatusMock.mockReset();
-    mocked.sessionPromptMock.mockReset();
     mocked.sessionPromptAsyncMock.mockReset();
     mocked.sessionCreateMock.mockReset();
     mocked.suppressionRegisterMock.mockReset();
@@ -183,10 +178,12 @@ describe("bot/handlers/prompt", () => {
     mocked.setSessionSummaryMock.mockReset();
     mocked.setBotAndChatIdMock.mockReset();
     mocked.attachToSessionMock.mockReset();
+    mocked.isFreeModelMock.mockReset();
+    mocked.isFreeModelMock.mockResolvedValue(false);
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
       alreadyAttached: false,
-      restoredQuestion: false,
+      restoredForm: false,
       restoredPermissions: 0,
     });
 
@@ -196,7 +193,6 @@ describe("bot/handlers/prompt", () => {
       },
       error: null,
     });
-    mocked.sessionPromptMock.mockResolvedValue({ data: {}, error: null });
     mocked.sessionPromptAsyncMock.mockResolvedValue({ data: {}, error: null });
   });
 
@@ -227,16 +223,54 @@ describe("bot/handlers/prompt", () => {
 
     expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith({
       sessionID: "session-1",
-      directory: "D:\\Projects\\Repo",
-      parts: [{ type: "text", text: "Review README" }],
+      text: "Review README",
+      files: [],
       agent: "build",
       model: {
         providerID: "openai",
         modelID: "gpt-5",
+        variant: "default",
       },
-      variant: "default",
     });
-    expect(mocked.sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it("appends the approval-scope instruction when a free model is selected", async () => {
+    mocked.isFreeModelMock.mockResolvedValue(true);
+
+    const handled = await processUserPrompt(createContext(), "Review README", createDeps());
+
+    expect(handled).toBe(true);
+
+    const backgroundTask = getScheduledBackgroundTask();
+    await backgroundTask.task();
+
+    expect(mocked.isFreeModelMock).toHaveBeenCalledWith("openai", "gpt-5");
+    const [promptArgs] = mocked.sessionPromptAsyncMock.mock.calls[0] as [{
+      sessionID: string;
+      text: string;
+      files: unknown[];
+    }];
+    expect(promptArgs.text).toContain("Review README");
+    expect(promptArgs.text).toContain("SECURITY CONSTRAINT (free-plan session)");
+  });
+
+  it("does not append the approval-scope instruction for paid models", async () => {
+    mocked.isFreeModelMock.mockResolvedValue(false);
+
+    const handled = await processUserPrompt(createContext(), "Review README", createDeps());
+
+    expect(handled).toBe(true);
+
+    const backgroundTask = getScheduledBackgroundTask();
+    await backgroundTask.task();
+
+    const [promptArgs] = mocked.sessionPromptAsyncMock.mock.calls[0] as [{
+      sessionID: string;
+      text: string;
+      files: unknown[];
+    }];
+    expect(promptArgs.text).toBe("Review README");
+    expect(promptArgs.text).not.toContain("SECURITY CONSTRAINT");
   });
 
   it("still notifies the user when promptAsync reports a real start error", async () => {

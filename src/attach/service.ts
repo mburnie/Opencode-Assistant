@@ -1,16 +1,23 @@
 import type { Bot, Context } from "grammy";
-import { opencodeClient } from "../opencode/client.js";
+import {
+  getActiveSessions,
+  getSessionForm,
+  listPendingPermissions,
+  listSessionForms,
+  toLegacyPermissionRequest,
+} from "../opencode/client-v2.js";
 import { stopEventListening } from "../opencode/events.js";
 import { summaryAggregator } from "../summary/aggregator.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
-import { questionManager } from "../question/manager.js";
+import { formManager } from "../form/manager.js";
 import { permissionManager } from "../permission/manager.js";
-import { showCurrentQuestion } from "../bot/handlers/question.js";
+import { handleFormCreated, showCurrentFormField } from "../bot/handlers/form.js";
 import { showPermissionRequest } from "../bot/handlers/permission.js";
 import type { SessionInfo } from "../session/manager.js";
 import { getCurrentSession } from "../session/manager.js";
 import { getCurrentProject } from "../settings/manager.js";
 import { attachManager } from "./manager.js";
+import { foregroundSessionState } from "../scheduled-task/foreground-state.js";
 import { logger } from "../utils/logger.js";
 
 interface EnsureAttachPinnedSessionParams {
@@ -29,7 +36,7 @@ export interface AttachSessionDeps {
 export interface AttachSessionResult {
   busy: boolean;
   alreadyAttached: boolean;
-  restoredQuestion: boolean;
+  restoredForm: boolean;
   restoredPermissions: number;
 }
 
@@ -45,7 +52,7 @@ function getAttachBusyStatus(sessionId: string, statuses: unknown): boolean {
   }
 
   const sessionStatus = (statuses as Record<string, { type?: string }>)[sessionId];
-  return sessionStatus?.type === "busy";
+  return sessionStatus?.type === "running";
 }
 
 async function ensureAttachPinnedSession({
@@ -80,40 +87,45 @@ async function syncPinnedAttachState(): Promise<void> {
   await pinnedMessageManager.setAttachState(attached !== null, attached?.busy ?? false);
 }
 
-async function restorePendingQuestion(
+async function restorePendingForm(
   bot: Bot<Context>,
   chatId: number,
   sessionId: string,
-  directory: string,
 ): Promise<boolean> {
-  const { data, error } = await opencodeClient.question.list({
-    directory,
-  });
+  const { data: forms, error } = await listSessionForms(sessionId);
 
-  if (error || !data) {
-    logger.warn("[Attach] Failed to load pending questions during attach:", error);
+  if (error || !forms) {
+    logger.warn("[Attach] Failed to load pending forms during attach:", error);
     return false;
   }
 
-  const pendingQuestion = data.find((request) => request.sessionID === sessionId);
-  if (!pendingQuestion) {
-    return false;
+  for (const formInfo of forms) {
+    const { data: form, error: formError } = await getSessionForm(sessionId, formInfo.id);
+
+    if (formError || !form) {
+      logger.warn(`[Attach] Failed to load form ${formInfo.id} during attach:`, formError);
+      continue;
+    }
+
+    if (form.state.status !== "pending") {
+      continue;
+    }
+
+    handleFormCreated(form, sessionId);
+    await showCurrentFormField(bot.api, chatId);
+    return true;
   }
 
-  questionManager.startQuestions(pendingQuestion.questions, pendingQuestion.id);
-  await showCurrentQuestion(bot.api, chatId);
-  return true;
+  return false;
 }
 
 async function restorePendingPermissions(
   bot: Bot<Context>,
   chatId: number,
   sessionId: string,
-  directory: string,
+  _directory: string,
 ): Promise<number> {
-  const { data, error } = await opencodeClient.permission.list({
-    directory,
-  });
+  const { data, error } = await listPendingPermissions(sessionId);
 
   if (error || !data) {
     logger.warn("[Attach] Failed to load pending permissions during attach:", error);
@@ -122,7 +134,7 @@ async function restorePendingPermissions(
 
   const pendingPermissions = data.filter((request) => request.sessionID === sessionId);
   for (const request of pendingPermissions) {
-    await showPermissionRequest(bot.api, chatId, request);
+    await showPermissionRequest(bot.api, chatId, toLegacyPermissionRequest(request));
   }
 
   return pendingPermissions.length;
@@ -148,9 +160,7 @@ export async function attachToSession(deps: AttachSessionDeps): Promise<AttachSe
     summaryAggregator.setBotAndChatId(bot, chatId);
   }
 
-  const { data: statuses, error: statusesError } = await opencodeClient.session.status({
-    directory: session.directory,
-  });
+  const { data: statuses, error: statusesError } = await getActiveSessions();
 
   if (statusesError) {
     logger.warn("[Attach] Failed to load session status during attach:", statusesError);
@@ -165,13 +175,13 @@ export async function attachToSession(deps: AttachSessionDeps): Promise<AttachSe
 
   await syncPinnedAttachState();
 
-  let restoredQuestion = false;
+  let restoredForm = false;
   let restoredPermissions = 0;
 
-  if (!alreadyAttached && !questionManager.isActive() && !permissionManager.isActive()) {
-    restoredQuestion = await restorePendingQuestion(bot, chatId, session.id, session.directory);
+  if (!alreadyAttached && !formManager.isActive() && !permissionManager.isActive()) {
+    restoredForm = await restorePendingForm(bot, chatId, session.id);
 
-    if (!restoredQuestion) {
+    if (!restoredForm) {
       restoredPermissions = await restorePendingPermissions(
         bot,
         chatId,
@@ -184,7 +194,7 @@ export async function attachToSession(deps: AttachSessionDeps): Promise<AttachSe
   return {
     busy,
     alreadyAttached,
-    restoredQuestion,
+    restoredForm,
     restoredPermissions,
   };
 }
@@ -248,4 +258,74 @@ export async function markAttachedSessionIdle(sessionId: string): Promise<void> 
   }
 
   await syncPinnedAttachState();
+}
+
+/**
+ * Reconciles the local attached-session busy flag with OpenCode's
+ * session.active() source of truth. Returns the reconciled busy state.
+ *
+ * This is used by the interaction guard and abort path to ensure a stale
+ * local busy flag never permanently blocks Telegram input while OpenCode
+ * reports the session as idle.
+ */
+export async function reconcileAttachedSessionBusyState(sessionId: string): Promise<boolean> {
+  if (!attachManager.isAttachedSession(sessionId)) {
+    return false;
+  }
+
+  const { data: statuses, error: statusesError } = await getActiveSessions();
+
+  if (statusesError) {
+    logger.warn("[Attach] Failed to load session status during reconcile:", statusesError);
+    // On error, keep current local state to avoid falsely allowing input.
+    return attachManager.isBusy();
+  }
+
+  const busy = getAttachBusyStatus(sessionId, statuses);
+  if (busy) {
+    attachManager.markBusy(sessionId);
+  } else {
+    attachManager.markIdle(sessionId);
+  }
+
+  return busy;
+}
+
+/**
+ * Reconciles the local foreground-session busy flags with OpenCode's
+ * session.active() source of truth. Mirrors reconcileAttachedSessionBusyState
+ * for the foreground/scheduled-task run state, which is otherwise only
+ * cleared by SSE idle events — if those are lost, input stays blocked
+ * with a "session busy" message even though nothing is running.
+ */
+export async function reconcileForegroundSessionBusyState(): Promise<void> {
+  if (!foregroundSessionState.isBusy()) {
+    return;
+  }
+
+  const result = await getActiveSessions();
+
+  if (!result) {
+    logger.warn("[Attach] No session status during foreground reconcile");
+    // On error, keep current local state to avoid falsely allowing input.
+    return;
+  }
+
+  const { data: statuses, error: statusesError } = result;
+
+  if (statusesError || !statuses) {
+    logger.warn(
+      "[Attach] Failed to load session status during foreground reconcile:",
+      statusesError,
+    );
+    // On error, keep current local state to avoid falsely allowing input.
+    return;
+  }
+
+  for (const sessionId of foregroundSessionState.getActiveSessionIds()) {
+    const sessionStatus = (statuses as Record<string, { type?: string }>)[sessionId];
+    if (sessionStatus?.type !== "running") {
+      foregroundSessionState.markIdle(sessionId);
+    }
+  }
 }

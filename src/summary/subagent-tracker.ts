@@ -1,4 +1,4 @@
-import type { ToolState } from "@opencode-ai/sdk/v2";
+import type { ToolState } from "./aggregator.js";
 import { normalizeSnapshotValue } from "./aggregator-helpers.js";
 
 export type SubagentStatus = "pending" | "running" | "completed" | "error";
@@ -190,11 +190,6 @@ export class SubagentTracker {
 
     if (status === "running") {
       subagent.status = "running";
-      subagent.terminalMessage = undefined;
-    }
-
-    if (status === "pending" && subagent.status === "pending") {
-      subagent.status = "pending";
       subagent.terminalMessage = undefined;
     }
 

@@ -1,4 +1,4 @@
-import { opencodeClient } from "../opencode/client.js";
+import { listProvidersWithModels } from "../opencode/client-v2.js";
 import { logger } from "../utils/logger.js";
 import { DEFAULT_CONTEXT_LIMIT } from "../pinned/format.js";
 
@@ -25,15 +25,15 @@ async function refreshContextLimitCache(): Promise<void> {
 
   providersFetchInFlight = (async () => {
     try {
-      const { data, error } = await opencodeClient.config.providers();
+      const { data: providersData, error } = await listProvidersWithModels();
 
-      if (error || !data) {
+      if (error || !providersData) {
         logger.warn("[ModelContextLimit] Failed to fetch providers:", error);
         return;
       }
 
       contextLimitCache.clear();
-      for (const provider of data.providers) {
+      for (const provider of providersData) {
         for (const [modelID, model] of Object.entries(provider.models)) {
           if (model?.limit?.context) {
             contextLimitCache.set(getModelKey(provider.id, modelID), model.limit.context);

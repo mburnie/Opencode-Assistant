@@ -1,7 +1,7 @@
 /**
  * Variant Manager - manages model variants (reasoning modes)
  */
-import { opencodeClient } from "../opencode/client.js";
+import { listProvidersWithModels } from "../opencode/client-v2.js";
 import { getCurrentModel, setCurrentModel } from "../settings/manager.js";
 import { logger } from "../utils/logger.js";
 import type { VariantInfo } from "../model/types.js";
@@ -17,14 +17,14 @@ export async function getAvailableVariants(
   modelID: string,
 ): Promise<VariantInfo[]> {
   try {
-    const { data, error } = await opencodeClient.config.providers();
+    const { data: providersData, error } = await listProvidersWithModels();
 
-    if (error || !data) {
+    if (error || !providersData) {
       logger.warn("[VariantManager] Failed to fetch providers:", error);
       return [{ id: "default" }];
     }
 
-    const provider = data.providers.find((p) => p.id === providerID);
+    const provider = providersData.find((p) => p.id === providerID);
     if (!provider) {
       logger.warn(`[VariantManager] Provider ${providerID} not found`);
       return [{ id: "default" }];
@@ -41,11 +41,10 @@ export async function getAvailableVariants(
 
     if (model.variants) {
       // Add other variants from API (excluding default if it's already there)
-      const apiVariants = Object.entries(model.variants)
-        .filter(([id]) => id !== "default")
-        .map(([id, info]) => ({
-          id,
-          disabled: (info as { disabled?: boolean }).disabled,
+      const apiVariants = model.variants
+        .filter((variant) => variant.id !== "default")
+        .map((variant) => ({
+          id: variant.id,
         }));
 
       variants.push(...apiVariants);

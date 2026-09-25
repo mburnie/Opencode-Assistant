@@ -9,5 +9,5 @@ export function isBusyAllowedCommand(command?: string): boolean {
 }
 
 export function allowsBusyInteraction(kind: InteractionKind | undefined): boolean {
-  return kind === "question" || kind === "permission";
+  return kind === "question" || kind === "form" || kind === "permission";
 }

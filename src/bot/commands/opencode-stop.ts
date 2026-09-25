@@ -1,6 +1,6 @@
 import { CommandContext, Context } from "grammy";
 import { config } from "../../config.js";
-import { opencodeClient } from "../../opencode/client.js";
+import { checkServerHealth } from "../../opencode/client-v2.js";
 import {
   findServerPid,
   killServerProcess,
@@ -23,8 +23,8 @@ export async function opencodeStopCommand(ctx: CommandContext<Context>) {
     }
 
     try {
-      const { data, error } = await opencodeClient.global.health();
-      if (error || !data?.healthy) {
+      const { healthy } = await checkServerHealth();
+      if (!healthy) {
         await ctx.reply(t("opencode_stop.not_running"));
         return;
       }
@@ -53,8 +53,8 @@ export async function opencodeStopCommand(ctx: CommandContext<Context>) {
     }
 
     try {
-      const { data, error } = await opencodeClient.global.health();
-      if (!error && data?.healthy) {
+      const { healthy } = await checkServerHealth();
+      if (healthy) {
         await editBotText({
           api: ctx.api,
           chatId: ctx.chat.id,

@@ -20,12 +20,8 @@ const mocked = vi.hoisted(() => ({
   sendBotTextMock: vi.fn(),
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    global: {
-      health: mocked.healthMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  checkServerHealth: mocked.healthMock,
 }));
 
 vi.mock("../../../src/session/manager.js", () => ({
@@ -80,7 +76,7 @@ describe("bot/commands/status", () => {
     mocked.pinnedGetContextInfoMock.mockReset();
     mocked.sendBotTextMock.mockReset();
 
-    mocked.healthMock.mockResolvedValue({ data: { healthy: true, version: "1.0.0" }, error: null });
+    mocked.healthMock.mockResolvedValue({ healthy: true, version: "1.0.0" });
     mocked.getCurrentSessionMock.mockReturnValue({ id: "s1", title: "S", directory: "/repo" });
     mocked.getCurrentProjectMock.mockReturnValue({ id: "p1", worktree: "/repo", name: "Repo" });
     mocked.isTtsEnabledMock.mockReturnValue(true);

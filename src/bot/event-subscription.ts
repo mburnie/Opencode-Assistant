@@ -1,6 +1,5 @@
 import { config } from "../config.js";
-import { attachManager } from "../attach/manager.js";
-import { markAttachedSessionBusy, markAttachedSessionIdle } from "../attach/service.js";
+import { markAttachedSessionIdle } from "../attach/service.js";
 import { externalUserInputSuppressionManager } from "../external-input/suppression.js";
 import { getUiPreferences } from "../settings/manager.js";
 
@@ -17,10 +16,8 @@ function shouldHideToolMessages(): boolean {
 import { t } from "../i18n/index.js";
 import { interactionManager as _interactionManager } from "../interaction/manager.js";
 import { clearAllInteractionState } from "../interaction/cleanup.js";
-import { opencodeClient } from "../opencode/client.js";
 import { subscribeToEvents } from "../opencode/events.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
-import { questionManager } from "../question/manager.js";
 import { foregroundSessionState } from "../scheduled-task/foreground-state.js";
 import { scheduledTaskRuntime } from "../scheduled-task/runtime.js";
 import { ingestSessionInfoForCache } from "../session/cache-manager.js";
@@ -35,13 +32,16 @@ import { safeBackgroundTask } from "../utils/safe-background-task.js";
 import { assistantRunState } from "./assistant-run-state.js";
 import { isCompacting, unmarkCompacting } from "./compaction-state.js";
 import {
-  getEventSessionId,
   getToolStreamKey,
   prepareDocumentCaption,
-  shouldMarkAttachedBusyFromEvent,
 } from "./event-helpers.js";
 import { showPermissionRequest } from "./handlers/permission.js";
-import { showCurrentQuestion } from "./handlers/question.js";
+import {
+  showCurrentFormField,
+  handleFormCreated,
+  handleFormReplied,
+  handleFormCancelled,
+} from "./handlers/form.js";
 import { clearPromptResponseMode } from "./handlers/prompt.js";
 import {
   enqueueSessionCompletionTask,
@@ -95,28 +95,6 @@ export function createEventSubscriber(
     }
 
     summaryAggregator.setTypingIndicatorEnabled(true);
-
-    // Lookup que el aggregator usa en session.idle para preguntarle al server
-    // qué partIDs son reasoning. v1.15 emite los deltas sin discriminador de
-    // tipo (todos con field=text), así que esta es la única forma fiable de
-    // separar reasoning de texto real antes de renderizar al chat.
-    summaryAggregator.setMessagePartTypeLookup(async (sessionID, messageID) => {
-      const types = new Map<string, string>();
-      try {
-        const { data } = await opencodeClient.session.message({ sessionID, messageID });
-        const parts = (data as { parts?: Array<{ id: string; type: string }> })?.parts;
-        if (Array.isArray(parts)) {
-          for (const p of parts) {
-            if (p?.id && p?.type) {
-              types.set(p.id, p.type);
-            }
-          }
-        }
-      } catch (err) {
-        logger.warn(`[Bot] messagePartTypeLookup failed for ${messageID}:`, err);
-      }
-      return types;
-    });
 
     summaryAggregator.setOnCleared(() => {
       toolMessageBatcher.clearAll("summary_aggregator_clear");
@@ -374,11 +352,11 @@ export function createEventSubscriber(
       }
     });
 
-    summaryAggregator.setOnQuestion(async (questions, requestID, sessionId) => {
+    summaryAggregator.setOnForm(async (form, sessionId) => {
       const bot = ctx.getBot();
       const chatId = ctx.getChatId();
       if (!bot || !chatId) {
-        logger.error("Bot or chat ID not available for showing questions");
+        logger.error("Bot or chat ID not available for showing form");
         return;
       }
 
@@ -388,45 +366,21 @@ export function createEventSubscriber(
       }
 
       await Promise.all([
-        toolMessageBatcher.flushSession(currentSession.id, "question_asked"),
-        toolCallStreamer.flushSession(currentSession.id, "question_asked"),
+        toolMessageBatcher.flushSession(currentSession.id, "form_created"),
+        toolCallStreamer.flushSession(currentSession.id, "form_created"),
       ]);
 
-      if (questionManager.isActive()) {
-        logger.warn("[Bot] Replacing active poll with a new one");
-
-        const previousMessageIds = questionManager.getMessageIds();
-        for (const messageId of previousMessageIds) {
-          await bot.api.deleteMessage(chatId, messageId).catch(() => {});
-        }
-
-        clearAllInteractionState("question_replaced_by_new_poll");
-      }
-
-      logger.info(
-        `[Bot] Received ${questions.length} questions from agent, requestID=${requestID}`,
-      );
-      questionManager.startQuestions(questions, requestID);
-      await showCurrentQuestion(bot.api, chatId);
+      logger.info(`[Bot] Received form from agent: formID=${form.id}, fields=${form.fields.length}`);
+      handleFormCreated(form, sessionId);
+      await showCurrentFormField(bot.api, chatId);
     });
 
-    summaryAggregator.setOnQuestionError(async () => {
-      logger.info(`[Bot] Question tool failed, clearing active poll and deleting messages`);
+    summaryAggregator.setOnFormReplied(async (formId, sessionId) => {
+      handleFormReplied(formId, sessionId);
+    });
 
-      const bot = ctx.getBot();
-      const chatId = ctx.getChatId();
-
-      // Delete all messages from the invalid poll
-      const messageIds = questionManager.getMessageIds();
-      for (const messageId of messageIds) {
-        if (chatId && bot) {
-          await bot.api.deleteMessage(chatId, messageId).catch((err) => {
-            logger.error(`[Bot] Failed to delete question message ${messageId}:`, err);
-          });
-        }
-      }
-
-      clearAllInteractionState("question_error");
+    summaryAggregator.setOnFormCancelled(async (formId, sessionId) => {
+      handleFormCancelled(formId, sessionId);
     });
 
     summaryAggregator.setOnPermission(async (request) => {
@@ -687,18 +641,6 @@ export function createEventSubscriber(
       toolCallStreamer.replaceByPrefix(sessionId, SESSION_RETRY_PREFIX, retryMessage);
     });
 
-    summaryAggregator.setOnSessionDiff(async (_sessionId, diffs) => {
-      if (!pinnedMessageManager.isInitialized()) {
-        return;
-      }
-
-      try {
-        await pinnedMessageManager.onSessionDiff(diffs);
-      } catch (err) {
-        logger.error("[Bot] Error updating session diff:", err);
-      }
-    });
-
     summaryAggregator.setOnFileChange((change) => {
       if (!pinnedMessageManager.isInitialized()) {
         return;
@@ -708,25 +650,17 @@ export function createEventSubscriber(
 
     logger.info(`[Bot] Subscribing to OpenCode events for project: ${directory}`);
     subscribeToEvents(directory, (event) => {
-      const attached = attachManager.getSnapshot();
-      const eventSessionId = getEventSessionId(event);
-      if (
-        attached &&
-        eventSessionId === attached.sessionId &&
-        shouldMarkAttachedBusyFromEvent(event)
-      ) {
-        void markAttachedSessionBusy(attached.sessionId);
-      }
-
-      if (event.type === "session.created" || event.type === "session.updated") {
-        const info = (
-          event.properties as { info?: { directory?: string; time?: { updated?: number } } }
-        ).info;
-
-        if (info?.directory) {
+      // Cache session info for newly created sessions
+      if (event.type === "session.created" || event.type === "session.renamed" || event.type === "session.metadata.updated") {
+        const data = event.data as { sessionID?: string; location?: { directory?: string } };
+        if (data.sessionID) {
           safeBackgroundTask({
             taskName: `session.cache.${event.type}`,
-            task: () => ingestSessionInfoForCache(info),
+            task: () =>
+              ingestSessionInfoForCache({
+                directory: data.location?.directory,
+                time: { updated: Date.now() },
+              }),
           });
         }
       }

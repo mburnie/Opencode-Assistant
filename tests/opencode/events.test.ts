@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Event } from "@opencode-ai/sdk/v2";
+import type { V2Event } from "@opencode/client/promise";
 
 const { subscribeMock } = vi.hoisted(() => {
   return {
@@ -7,8 +7,8 @@ const { subscribeMock } = vi.hoisted(() => {
   };
 });
 
-vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
+vi.mock("../../src/opencode/client-v2.js", () => ({
+  opencodeClientV2: {
     event: {
       subscribe: subscribeMock,
     },
@@ -17,7 +17,7 @@ vi.mock("../../src/opencode/client.js", () => ({
 
 import { stopEventListening, subscribeToEvents } from "../../src/opencode/events.js";
 
-function createStream(events: Event[]): AsyncGenerator<Event, void, unknown> {
+function createStream(events: V2Event[]): AsyncGenerator<V2Event, void, unknown> {
   return (async function* () {
     for (const event of events) {
       yield event;
@@ -25,7 +25,7 @@ function createStream(events: Event[]): AsyncGenerator<Event, void, unknown> {
   })();
 }
 
-function createAbortableStream(signal: AbortSignal): AsyncGenerator<Event, void, unknown> {
+function createAbortableStream(signal: AbortSignal): AsyncGenerator<V2Event, void, unknown> {
   return (async function* () {
     while (!signal.aborted) {
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -43,9 +43,12 @@ describe("opencode/events", () => {
   });
 
   it("subscribes to stream and forwards events to callback", async () => {
-    const eventA = { type: "session.status", properties: { sessionID: "s1" } } as Event;
-    const eventB = { type: "session.idle", properties: { sessionID: "s1" } } as Event;
-    subscribeMock.mockResolvedValueOnce({ stream: createStream([eventA, eventB]) });
+    const eventA = {
+      type: "session.status",
+      data: { sessionID: "s1", status: { type: "busy" } },
+    } as V2Event;
+    const eventB = { type: "session.idle", data: { sessionID: "s1" } } as V2Event;
+    subscribeMock.mockReturnValueOnce(createStream([eventA, eventB]));
 
     const callback = vi.fn();
     const subscription = subscribeToEvents("D:/repo", callback);
@@ -57,18 +60,42 @@ describe("opencode/events", () => {
     stopEventListening();
     await subscription;
 
-    expect(subscribeMock).toHaveBeenCalledWith(
-      { directory: "D:/repo" },
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    expect(subscribeMock).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+    });
     expect(callback).toHaveBeenCalledTimes(2);
     expect(callback.mock.calls[0][0]).toEqual(eventA);
     expect(callback.mock.calls[1][0]).toEqual(eventB);
   });
 
+  it("ignores events from other directories", async () => {
+    const matchingEvent = {
+      type: "session.idle",
+      location: { directory: "D:/repo" },
+      data: { sessionID: "s1" },
+    } as V2Event;
+    const otherEvent = {
+      type: "session.idle",
+      location: { directory: "D:/other" },
+      data: { sessionID: "s2" },
+    } as V2Event;
+    subscribeMock.mockReturnValueOnce(createStream([otherEvent, matchingEvent]));
+
+    const callback = vi.fn();
+    const subscription = subscribeToEvents("D:/repo", callback);
+    await vi.waitFor(() => {
+      expect(callback).toHaveBeenCalledOnce();
+    });
+
+    stopEventListening();
+    await subscription;
+
+    expect(callback).toHaveBeenCalledWith(matchingEvent);
+  });
+
   it("does not create duplicate subscription for same directory while active", async () => {
-    subscribeMock.mockImplementation(async (_params, options: { signal: AbortSignal }) => {
-      return { stream: createAbortableStream(options.signal) };
+    subscribeMock.mockImplementation(({ signal }: { signal: AbortSignal }) => {
+      return createAbortableStream(signal);
     });
 
     const firstCallback = vi.fn();
@@ -89,12 +116,12 @@ describe("opencode/events", () => {
     let firstSignal: { aborted: boolean } | null = null;
 
     subscribeMock
-      .mockImplementationOnce(async (_params, options: { signal: AbortSignal }) => {
-        firstSignal = options.signal;
-        return { stream: createAbortableStream(options.signal) };
+      .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+        firstSignal = signal;
+        return createAbortableStream(signal);
       })
-      .mockImplementationOnce(async (_params, options: { signal: AbortSignal }) => {
-        return { stream: createAbortableStream(options.signal) };
+      .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+        return createAbortableStream(signal);
       });
 
     const firstSubscription = subscribeToEvents("D:/repo-a", vi.fn());
@@ -116,8 +143,8 @@ describe("opencode/events", () => {
     await Promise.all([firstSubscription, secondSubscription]);
   });
 
-  it("throws when subscribe result has no stream", async () => {
-    subscribeMock.mockResolvedValueOnce({ stream: null });
+  it("throws when subscription returns no stream", async () => {
+    subscribeMock.mockReturnValueOnce(null);
 
     await expect(subscribeToEvents("D:/repo", vi.fn())).rejects.toThrow(
       "No stream returned from event subscription",
@@ -126,9 +153,9 @@ describe("opencode/events", () => {
 
   it("reconnects when stream ends unexpectedly", async () => {
     subscribeMock
-      .mockResolvedValueOnce({ stream: createStream([]) })
-      .mockImplementationOnce(async (_params, options: { signal: AbortSignal }) => {
-        return { stream: createAbortableStream(options.signal) };
+      .mockReturnValueOnce(createStream([]))
+      .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+        return createAbortableStream(signal);
       });
 
     const subscription = subscribeToEvents("D:/repo", vi.fn());
@@ -146,9 +173,11 @@ describe("opencode/events", () => {
 
   it("reconnects after non-fatal stream error", async () => {
     subscribeMock
-      .mockRejectedValueOnce(new Error("transient stream failure"))
-      .mockImplementationOnce(async (_params, options: { signal: AbortSignal }) => {
-        return { stream: createAbortableStream(options.signal) };
+      .mockImplementationOnce(() => {
+        throw new Error("transient stream failure");
+      })
+      .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+        return createAbortableStream(signal);
       });
 
     const subscription = subscribeToEvents("D:/repo", vi.fn());
@@ -165,8 +194,11 @@ describe("opencode/events", () => {
   });
 
   it("does not deliver queued callback after listener is stopped", async () => {
-    const event = { type: "session.status", properties: { sessionID: "s1" } } as Event;
-    subscribeMock.mockResolvedValueOnce({ stream: createStream([event]) });
+    const event = {
+      type: "session.status",
+      data: { sessionID: "s1", status: { type: "busy" } },
+    } as V2Event;
+    subscribeMock.mockReturnValueOnce(createStream([event]));
 
     const callback = vi.fn();
     const subscription = subscribeToEvents("D:/repo", callback);

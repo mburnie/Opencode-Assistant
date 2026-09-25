@@ -1,5 +1,10 @@
 import { Bot, CommandContext, Context, InlineKeyboard } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import {
+  createSession,
+  getActiveSessions,
+  commandSession,
+  listCommands,
+} from "../../opencode/client-v2.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import {
   clearSession,
@@ -304,9 +309,7 @@ function clearCommandsInteraction(reason: string): void {
 }
 
 async function getCommandList(projectDirectory: string): Promise<CommandItem[]> {
-  const { data, error } = await opencodeClient.command.list({
-    directory: normalizeDirectoryForCommandApi(projectDirectory),
-  });
+  const { data, error } = await listCommands(normalizeDirectoryForCommandApi(projectDirectory));
 
   if (error || !data) {
     throw error || new Error("No command data received");
@@ -314,10 +317,7 @@ async function getCommandList(projectDirectory: string): Promise<CommandItem[]> 
 
   return data
     .filter((command) => {
-      const source = (command as { source?: unknown }).source;
-      return (
-        typeof command.name === "string" && command.name.trim().length > 0 && source === "command"
-      );
+      return typeof command.name === "string" && command.name.trim().length > 0;
     })
     .map((command) => ({
       name: command.name,
@@ -340,21 +340,21 @@ function parseSelectIndex(data: string): number | null {
   return index;
 }
 
-async function isSessionBusy(sessionId: string, directory: string): Promise<boolean> {
+async function isSessionBusy(sessionId: string, _directory: string): Promise<boolean> {
   try {
-    const { data, error } = await opencodeClient.session.status({ directory });
+    const { data, error } = await getActiveSessions();
 
     if (error || !data) {
       logger.warn("[Commands] Failed to check session status before command:", error);
       return false;
     }
 
-    const sessionStatus = (data as Record<string, { type?: string }>)[sessionId];
+    const sessionStatus = data[sessionId];
     if (!sessionStatus) {
       return false;
     }
 
-    return sessionStatus.type === "busy";
+    return sessionStatus.type === "running";
   } catch (err) {
     logger.warn("[Commands] Error checking session status before command:", err);
     return false;
@@ -386,7 +386,7 @@ async function ensureSessionForProject(
 
   await ctx.reply(t("bot.creating_session"));
 
-  const { data: session, error } = await opencodeClient.session.create({
+  const { data: session, error } = await createSession({
     directory: projectDirectory,
   });
 
@@ -395,15 +395,16 @@ async function ensureSessionForProject(
     return null;
   }
 
+  const title = session.title ?? "Untitled";
   const sessionInfo: SessionInfo = {
     id: session.id,
-    title: session.title,
+    title,
     directory: projectDirectory,
   };
 
   setCurrentSession("telegram", sessionInfo);
   await ingestSessionInfoForCache(session);
-  await ctx.reply(t("bot.session_created", { title: session.title }));
+  await ctx.reply(t("bot.session_created", { title }));
 
   return sessionInfo;
 }
@@ -441,10 +442,6 @@ async function executeCommand(
 
   const currentAgent = await resolveProjectAgent(getStoredAgent());
   const storedModel = getStoredModel();
-  const model =
-    storedModel.providerID && storedModel.modelID
-      ? `${storedModel.providerID}/${storedModel.modelID}`
-      : undefined;
 
   foregroundSessionState.markBusy(session.id);
   await markAttachedSessionBusy(session.id);
@@ -462,14 +459,19 @@ async function executeCommand(
   safeBackgroundTask({
     taskName: "session.command",
     task: () =>
-      opencodeClient.session.command({
+      commandSession({
         sessionID: session.id,
-        directory: session.directory,
-        command: params.commandName,
-        arguments: args,
+        name: params.commandName,
+        text: args,
         agent: currentAgent,
-        model,
-        variant: storedModel.variant,
+        model:
+          storedModel.providerID && storedModel.modelID
+            ? {
+                providerID: storedModel.providerID,
+                modelID: storedModel.modelID,
+                variant: storedModel.variant,
+              }
+            : undefined,
       }),
     onSuccess: ({ error }) => {
       if (error) {

@@ -61,12 +61,8 @@ vi.mock("../../src/config.js", () => ({
   config: configMock,
 }));
 
-vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    config: {
-      providers: providersMock,
-    },
-  },
+vi.mock("../../src/opencode/client-v2.js", () => ({
+  listProvidersWithModels: providersMock,
 }));
 
 vi.mock("../../src/settings/manager.js", () => ({
@@ -84,20 +80,24 @@ vi.mock("../../src/utils/logger.js", () => ({
 }));
 
 import {
+  __resetFreeModelCacheForTests,
   __resetModelCatalogCacheForTests,
   getFavoriteModels,
   getModelSelectionLists,
+  isFreeModel,
   reconcileStoredModelSelection,
 } from "../../src/model/manager.js";
 
 function createProvidersResponse(modelsByProvider: Record<string, string[]>) {
   return {
-    data: {
-      providers: Object.entries(modelsByProvider).map(([providerID, modelIDs]) => ({
-        id: providerID,
-        models: Object.fromEntries(modelIDs.map((modelID) => [modelID, { id: modelID }])),
-      })),
-    },
+    data: Object.entries(modelsByProvider).map(([providerID, modelIDs]) => ({
+      id: providerID,
+      name: providerID,
+      activation: "enabled" as const,
+      models: Object.fromEntries(
+        modelIDs.map((modelID) => [modelID, { modelID, name: modelID }] as const),
+      ),
+    })),
     error: null,
   };
 }
@@ -114,6 +114,7 @@ describe("model/manager", () => {
     vi.useRealTimers();
     resetCurrentModelState();
     __resetModelCatalogCacheForTests();
+    __resetFreeModelCacheForTests();
 
     loggerInfoMock.mockReset();
     loggerWarnMock.mockReset();
@@ -450,6 +451,94 @@ describe("model/manager", () => {
         variant: "high",
       });
       expect(setCurrentModelMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("isFreeModel", () => {
+    function createProvidersResponseWithCost(
+      modelsByProvider: Record<string, Array<{ id: string; cost?: unknown[] }>>,
+    ) {
+      return {
+        data: Object.entries(modelsByProvider).map(([providerID, models]) => ({
+          id: providerID,
+          name: providerID,
+          activation: "enabled" as const,
+          models: Object.fromEntries(
+            models.map((model) => [
+              model.id,
+              {
+                modelID: model.id,
+                name: model.id,
+                cost: model.cost,
+                status: "active",
+              },
+            ]),
+          ),
+        })),
+        error: null,
+      };
+    }
+
+    it("returns true for a model with all-zero cost tiers", async () => {
+      providersMock.mockResolvedValue(
+        createProvidersResponseWithCost({
+          opencode: [
+            {
+              id: "big-pickle",
+              cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+            },
+          ],
+        }),
+      );
+
+      expect(await isFreeModel("opencode", "big-pickle")).toBe(true);
+    });
+
+    it("returns false for a model with a non-zero cost tier", async () => {
+      providersMock.mockResolvedValue(
+        createProvidersResponseWithCost({
+          openai: [
+            {
+              id: "gpt-5",
+              cost: [
+                {
+                  input: 1.25,
+                  output: 10,
+                  cache: { read: 0.25, write: 1.5 },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      expect(await isFreeModel("openai", "gpt-5")).toBe(false);
+    });
+
+    it("returns false for models without cost metadata", async () => {
+      providersMock.mockResolvedValue(
+        createProvidersResponseWithCost({
+          anthropic: [{ id: "claude-sonnet", cost: undefined }],
+        }),
+      );
+
+      expect(await isFreeModel("anthropic", "claude-sonnet")).toBe(false);
+    });
+
+    it("returns false when the catalog is unavailable", async () => {
+      providersMock.mockResolvedValue({ data: null, error: new Error("server down") });
+
+      expect(await isFreeModel("opencode", "big-pickle")).toBe(false);
+    });
+
+    it("returns false for unknown models", async () => {
+      providersMock.mockResolvedValue(
+        createProvidersResponseWithCost({
+          opencode: [{ id: "big-pickle" }],
+        }),
+      );
+
+      expect(await isFreeModel("opencode", "no-such-model")).toBe(false);
     });
   });
 });

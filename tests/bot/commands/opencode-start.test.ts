@@ -21,12 +21,8 @@ vi.mock("../../../src/config.js", () => ({
   config: mocked.config,
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    global: {
-      health: mocked.healthMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  checkServerHealth: mocked.healthMock,
 }));
 
 vi.mock("../../../src/opencode/process.js", () => ({
@@ -94,7 +90,7 @@ describe("bot/commands/opencode-start", () => {
 
   it("reports that the server is already running when health-check succeeds", async () => {
     const ctx = createContext();
-    mocked.healthMock.mockResolvedValue({ data: { healthy: true, version: "1.2.3" }, error: null });
+    mocked.healthMock.mockResolvedValue({ healthy: true, version: "1.2.3" });
 
     await opencodeStartCommand(ctx as never);
 
@@ -110,8 +106,8 @@ describe("bot/commands/opencode-start", () => {
     mocked.startLocalOpencodeServerMock.mockReturnValue(childProcess);
     mocked.healthMock
       .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce({ data: { healthy: true, version: "1.2.3" }, error: null })
-      .mockResolvedValueOnce({ data: { healthy: true, version: "1.2.3" }, error: null });
+      .mockResolvedValueOnce({ healthy: true, version: "1.2.3" })
+      .mockResolvedValueOnce({ healthy: true, version: "1.2.3" });
 
     await opencodeStartCommand(ctx as never);
 

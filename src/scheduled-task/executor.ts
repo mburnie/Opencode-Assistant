@@ -1,5 +1,11 @@
 import { config } from "../config.js";
-import { opencodeClient } from "../opencode/client.js";
+import {
+  createSession,
+  deleteSession,
+  promptSession,
+  getActiveSessions,
+} from "../opencode/client-v2.js";
+import { listMessages } from "../opencode/client-v2-messages.js";
 import { logger } from "../utils/logger.js";
 import type { ScheduledTask, ScheduledTaskExecutionResult } from "./types.js";
 import { injectMemoryIntoPrompt } from "../memory/injector.js";
@@ -146,11 +152,10 @@ function extractAssistantResult(message: AssistantMessageSnapshot | null): {
 
 async function loadAssistantResult(
   sessionId: string,
-  directory: string,
+  _directory: string,
 ): Promise<ReturnType<typeof extractAssistantResult>> {
-  const { data: messages, error: messagesError } = await opencodeClient.session.messages({
+  const { data: messages, error: messagesError } = await listMessages({
     sessionID: sessionId,
-    directory,
   });
 
   if (messagesError || !messages) {
@@ -184,15 +189,13 @@ async function waitForScheduledTaskResult(sessionId: string, directory: string):
       throw new Error("Scheduled task returned an empty assistant response");
     }
 
-    const { data: statuses, error: statusError } = await opencodeClient.session.status({
-      directory,
-    });
-    if (statusError || !statuses) {
+    const { data: activeSessions, error: statusError } = await getActiveSessions();
+    if (statusError || !activeSessions) {
       throw statusError || new Error("Failed to load scheduled task status");
     }
 
-    const sessionStatus = statuses[sessionId];
-    if (!sessionStatus || sessionStatus.type === "idle") {
+    const sessionStatus = activeSessions[sessionId];
+    if (!sessionStatus || sessionStatus.type !== "running") {
       const confirmedAssistantResult = await loadAssistantResult(sessionId, directory);
 
       if (confirmedAssistantResult.errorMessage) {
@@ -226,7 +229,7 @@ export async function executeScheduledTask(
   let sessionId: string | null = null;
 
   try {
-    const { data: session, error: createError } = await opencodeClient.session.create({
+    const { data: session, error: createError } = await createSession({
       directory: task.projectWorktree,
       title: SCHEDULED_TASK_SESSION_TITLE,
     });
@@ -237,48 +240,30 @@ export async function executeScheduledTask(
 
     sessionId = session.id;
 
-    const promptOptions: {
-      sessionID: string;
-      directory: string;
-      parts: Array<{ type: "text"; text: string }>;
-      agent: string;
-      model?: { providerID: string; modelID: string };
-      variant?: string;
-    } = {
+    const promptText = await injectMemoryIntoPrompt(task.prompt, session.id, {
+      ignoreInlineFactsOverride: true,
+      // Scheduled tasks run unattended, so we always want the env-default amount
+      // of inlined facts even when the user has /inline_facts off (set during
+      // interactive vector-recall testing). Without this flag, an off override
+      // would leave the task with zero memory context.
+      channel: "telegram",
+    });
+
+    const promptModel =
+      task.model.providerID && task.model.modelID
+        ? {
+            providerID: task.model.providerID,
+            modelID: task.model.modelID,
+            variant: task.model.variant ?? undefined,
+          }
+        : undefined;
+
+    const { error: promptError } = await promptSession({
       sessionID: session.id,
-      directory: session.directory,
-      parts: [
-        {
-          type: "text",
-          // ignoreInlineFactsOverride: scheduled tasks run unattended,
-          // so we always want the env-default amount of inlined facts
-          // even when the user has /inline_facts off (set during
-          // interactive vector-recall testing). Without this flag, an
-          // off override would leave the task with zero memory context.
-          text: await injectMemoryIntoPrompt(task.prompt, session.id, {
-            ignoreInlineFactsOverride: true,
-            // Scheduled tasks deliver their result through Telegram (the
-            // grammy bot owns the inline keyboard for continue/cancel).
-            // Hint the model accordingly so it formats for that surface.
-            channel: "telegram",
-          }),
-        },
-      ],
+      text: promptText,
       agent: SCHEDULED_TASK_AGENT,
-    };
-
-    if (task.model.providerID && task.model.modelID) {
-      promptOptions.model = {
-        providerID: task.model.providerID,
-        modelID: task.model.modelID,
-      };
-    }
-
-    if (task.model.variant) {
-      promptOptions.variant = task.model.variant;
-    }
-
-    const { error: promptError } = await opencodeClient.session.promptAsync(promptOptions);
+      model: promptModel,
+    });
 
     if (promptError) {
       throw promptError || new Error("Scheduled task prompt execution failed");
@@ -311,7 +296,7 @@ export async function executeScheduledTask(
   } finally {
     if (sessionId) {
       try {
-        await opencodeClient.session.delete({ sessionID: sessionId });
+        await deleteSession(sessionId);
       } catch (error) {
         logger.warn(
           `[ScheduledTaskExecutor] Failed to delete temporary session: sessionId=${sessionId}`,

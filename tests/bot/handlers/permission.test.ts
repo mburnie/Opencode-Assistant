@@ -18,12 +18,8 @@ const mocked = vi.hoisted(() => ({
   currentSession: null as { id: string; title: string; directory: string } | null,
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    permission: {
-      reply: mocked.permissionReplyMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  replyToPermission: mocked.permissionReplyMock,
 }));
 
 vi.mock("../../../src/settings/manager.js", () => ({
@@ -137,13 +133,13 @@ describe("bot/handlers/permission", () => {
     const [, , options] = sendMessageMock.mock.calls[0];
     const replyMarkup = (options as { reply_markup: InlineKeyboard }).reply_markup;
 
-    expect(replyMarkup.inline_keyboard).toHaveLength(3);
+    expect(replyMarkup.inline_keyboard).toHaveLength(2);
     expect(replyMarkup.inline_keyboard[0]?.[0]?.text).toBe(t("permission.button.allow"));
     expect(getCallbackData(replyMarkup.inline_keyboard[0]?.[0])).toBe("permission:once");
-    expect(replyMarkup.inline_keyboard[1]?.[0]?.text).toBe(t("permission.button.always"));
-    expect(getCallbackData(replyMarkup.inline_keyboard[1]?.[0])).toBe("permission:always");
-    expect(replyMarkup.inline_keyboard[2]?.[0]?.text).toBe(t("permission.button.reject"));
-    expect(getCallbackData(replyMarkup.inline_keyboard[2]?.[0])).toBe("permission:reject");
+    expect(replyMarkup.inline_keyboard[1]?.[0]?.text).toBe(t("permission.button.reject"));
+    expect(getCallbackData(replyMarkup.inline_keyboard[1]?.[0])).toBe("permission:reject");
+    // Security: no "allow always" button — approval must never become continuing.
+    expect(replyMarkup.inline_keyboard.some((row) => row.some((b) => getCallbackData(b) === "permission:always"))).toBe(false);
 
     expect(permissionManager.isActive()).toBe(true);
     expect(permissionManager.getRequestID(500)).toBe("perm-1");
@@ -207,7 +203,13 @@ describe("bot/handlers/permission", () => {
     expect(permissionManager.getRequestID(501)).toBe("perm-2");
   });
 
-  it("handles valid permission reply and clears active states", async () => {
+  it("downgrades a legacy 'always' reply to a rejection (no continuing approvals)", async () => {
+    mocked.currentSession = {
+      id: "session-1",
+      title: "Session",
+      directory: "D:/repo",
+    };
+
     const botApi = createBotApi(600);
     await showPermissionRequest(botApi, 777, createPermissionRequest("perm-valid"));
 
@@ -215,22 +217,25 @@ describe("bot/handlers/permission", () => {
     const handled = await handlePermissionCallback(ctx);
 
     expect(handled).toBe(true);
-    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: t("permission.reply.always") });
+    // Feedback and server reply both use deny-by-default semantics.
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: t("permission.reply.reject") });
     expect(ctx.deleteMessage).toHaveBeenCalledTimes(1);
 
     await flushMicrotasks();
 
-    expect(mocked.permissionReplyMock).toHaveBeenCalledWith({
-      requestID: "perm-valid",
-      directory: "D:/repo",
-      reply: "always",
-    });
+    expect(mocked.permissionReplyMock).toHaveBeenCalledWith("session-1", "perm-valid", "reject");
 
     expect(permissionManager.isActive()).toBe(false);
     expect(interactionManager.getSnapshot()).toBeNull();
   });
 
   it("keeps permission interaction active until all requests are replied", async () => {
+    mocked.currentSession = {
+      id: "session-1",
+      title: "Session",
+      directory: "D:/repo",
+    };
+
     const botApi = createBotApi(700);
 
     await showPermissionRequest(botApi, 777, createPermissionRequest("perm-1"));
@@ -247,11 +252,7 @@ describe("bot/handlers/permission", () => {
 
     await flushMicrotasks();
 
-    expect(mocked.permissionReplyMock).toHaveBeenCalledWith({
-      requestID: "perm-1",
-      directory: "D:/repo",
-      reply: "once",
-    });
+    expect(mocked.permissionReplyMock).toHaveBeenCalledWith("session-1", "perm-1", "once");
 
     expect(permissionManager.isActive()).toBe(true);
     expect(permissionManager.getPendingCount()).toBe(1);
@@ -272,11 +273,7 @@ describe("bot/handlers/permission", () => {
 
     await flushMicrotasks();
 
-    expect(mocked.permissionReplyMock).toHaveBeenCalledWith({
-      requestID: "perm-2",
-      directory: "D:/repo",
-      reply: "reject",
-    });
+    expect(mocked.permissionReplyMock).toHaveBeenCalledWith("session-1", "perm-2", "reject");
 
     expect(permissionManager.isActive()).toBe(false);
     expect(interactionManager.getSnapshot()).toBeNull();

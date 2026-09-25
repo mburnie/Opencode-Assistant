@@ -52,8 +52,8 @@ No public inbound ports are required for normal usage.
 - Send text prompts to OpenCode
 - Accept voice/audio messages, transcribe via Whisper-compatible STT API, and forward recognized text as prompts
 - Interrupt current task (ESC equivalent)
-- Handle OpenCode questions with inline options and custom text answers
-- Send selected/custom answers back to OpenCode (`question.reply`)
+- Handle OpenCode forms with inline options and custom text answers
+- Send selected/custom answers back to OpenCode (`session.form.reply`)
 - Handle permission requests interactively (`allow once` / `always` / `reject`)
 
 ### Result delivery
@@ -118,7 +118,7 @@ Text messages (non-commands) are treated as prompts for OpenCode only when no bl
 
 Interaction routing rules:
 
-- Only one interactive flow can be active at a time (inline menu, permission, question, rename, commands, skills)
+- Only one interactive flow can be active at a time (inline menu, permission, form, rename, commands, skills)
 - While an interaction is active, unrelated input is blocked with a contextual hint
 - Allowed utility commands during active interactions: `/help`, `/status`, `/abort`
 - Unknown slash commands return an explicit fallback message
@@ -139,7 +139,7 @@ Model picker behavior:
 - [x] Automatic tracking of the current OpenCode CLI session, including continuing it from Telegram, live updates, and external text input notifications
 - [x] Remote task execution and interruption support (`/abort`)
 - [x] Telegram-friendly result delivery, including sending generated code/files when needed
-- [x] Interactive question and permission handling directly in chat (buttons + custom answers)
+- [x] Interactive form and permission handling directly in chat (buttons + custom answers)
 - [x] Live pinned session status in chat (project, model, context usage, changed files)
 - [x] In-chat controls for model, agent, variant, and context
 - [x] Built-in and custom command catalog access (`/commands`)

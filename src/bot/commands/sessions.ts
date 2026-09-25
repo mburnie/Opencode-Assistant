@@ -1,7 +1,8 @@
 import type { Bot } from "grammy";
 import { CommandContext, Context } from "grammy";
 import { InlineKeyboard } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { listSessions, getSession } from "../../opencode/client-v2.js";
+import { listMessages } from "../../opencode/client-v2-messages.js";
 import { resolveProjectAgent } from "../../agent/manager.js";
 import { setCurrentSession, SessionInfo } from "../../session/manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
@@ -24,7 +25,7 @@ const SESSION_FETCH_EXTRA_COUNT = 1;
 
 type SessionListItem = {
   id: string;
-  title: string;
+  title?: string;
   directory: string;
   time: {
     created: number;
@@ -89,7 +90,7 @@ async function loadSessionPage(
   const startIndex = page * pageSize;
   const endExclusive = startIndex + pageSize;
 
-  const { data: sessions, error } = await opencodeClient.session.list({
+  const { data: sessions, error } = await listSessions({
     directory,
     limit: endExclusive + SESSION_FETCH_EXTRA_COUNT,
     roots: true,
@@ -107,7 +108,7 @@ async function loadSessionPage(
   );
 
   return {
-    sessions: pagedSessions as SessionListItem[],
+    sessions: pagedSessions,
     hasNext,
     page,
   };
@@ -238,10 +239,7 @@ export async function handleSessionSelect(ctx: Context, deps: SessionSelectDeps)
       return true;
     }
 
-    const { data: session, error } = await opencodeClient.session.get({
-      sessionID: sessionId,
-      directory: currentProject.worktree,
-    });
+    const { data: session, error } = await getSession(sessionId);
 
     if (error || !session) {
       throw error || new Error("Failed to get session details");
@@ -253,7 +251,7 @@ export async function handleSessionSelect(ctx: Context, deps: SessionSelectDeps)
 
     const sessionInfo: SessionInfo = {
       id: session.id,
-      title: session.title,
+      title: session.title ?? "Untitled",
       directory: currentProject.worktree,
     };
     setCurrentSession("telegram", sessionInfo);
@@ -320,7 +318,7 @@ export async function handleSessionSelect(ctx: Context, deps: SessionSelectDeps)
             ctx.api,
             chatId,
             null,
-            session.title,
+            session.title ?? "Untitled",
             session.id,
             currentProject.worktree,
           ),
@@ -372,12 +370,11 @@ function truncateText(text: string, maxLength: number): string {
 
 async function loadSessionPreview(
   sessionId: string,
-  directory: string,
+  _directory: string,
 ): Promise<SessionPreviewItem[]> {
   try {
-    const { data: messages, error } = await opencodeClient.session.messages({
+    const { data: messages, error } = await listMessages({
       sessionID: sessionId,
-      directory,
       limit: PREVIEW_MESSAGES_LIMIT,
     });
 

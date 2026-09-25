@@ -1,9 +1,9 @@
-import { Event, ToolState } from "@opencode-ai/sdk/v2";
+import type { V2Event } from "@opencode/client/promise";
 import type { Bot } from "grammy";
 import type { CodeFileData } from "./formatter.js";
 import { normalizePathForDisplay, prepareCodeFile } from "./formatter.js";
-import type { Question } from "../question/types.js";
 import type { PermissionRequest } from "../permission/types.js";
+import type { FormInfo } from "@opencode/client/promise";
 import type { FileChange } from "../pinned/types.js";
 import { logger } from "../utils/logger.js";
 import { getCurrentProject } from "../settings/manager.js";
@@ -13,6 +13,17 @@ import {
 } from "./aggregator-helpers.js";
 import { SubagentTracker } from "./subagent-tracker.js";
 import type { SubagentCallback } from "./subagent-tracker.js";
+
+/** Minimal tool-state shape used by the aggregator and subagent tracker. */
+export interface ToolState {
+  status: "streaming" | "running" | "completed" | "error";
+  input?: { [key: string]: unknown };
+  output?: unknown;
+  error?: unknown;
+  title?: string;
+  metadata?: { [key: string]: unknown };
+  time?: { start?: number; completed?: number };
+}
 
 export type { SubagentCallback, SubagentInfo, SubagentStatus } from "./subagent-tracker.js";
 
@@ -46,28 +57,6 @@ type ExternalUserInputCallback = (
   messageText: string,
 ) => void | Promise<void>;
 
-interface MessagePartDeltaEventRaw {
-  type: "message.part.delta";
-  properties: {
-    // v1.15.0 shape: flat fields with `field` as the part-type discriminator.
-    // Legacy `part` / `type` kept as optional for resilience if the server
-    // ever emits the old shape (e.g. through the v2→v1 bridge).
-    part?: {
-      id?: string;
-      sessionID?: string;
-      messageID?: string;
-      type?: string;
-      text?: string;
-    };
-    sessionID?: string;
-    messageID?: string;
-    partID?: string;
-    field?: string;
-    type?: string;
-    delta?: string;
-  };
-}
-
 export interface ToolInfo {
   sessionId: string;
   messageId: string;
@@ -89,9 +78,11 @@ type ToolCallback = (toolInfo: ToolInfo) => void;
 
 type ToolFileCallback = (fileInfo: ToolFileInfo) => void;
 
-type QuestionCallback = (questions: Question[], requestID: string, sessionId: string) => void;
+type FormCallback = (form: FormInfo, sessionId: string) => void;
 
-type QuestionErrorCallback = () => void;
+type FormRepliedCallback = (formId: string, sessionId: string) => void;
+
+type FormCancelledCallback = (formId: string, sessionId: string) => void;
 
 type ThinkingCallback = (sessionId: string) => void;
 
@@ -124,8 +115,6 @@ type SessionIdleCallback = (sessionId: string) => void;
 
 type PermissionCallback = (request: PermissionRequest) => void;
 
-type SessionDiffCallback = (sessionId: string, diffs: FileChange[]) => void;
-
 type FileChangeCallback = (change: FileChange) => void;
 
 type ClearedCallback = () => void;
@@ -152,8 +141,9 @@ class SummaryAggregator {
   private onExternalUserInputCallback: ExternalUserInputCallback | null = null;
   private onToolCallback: ToolCallback | null = null;
   private onToolFileCallback: ToolFileCallback | null = null;
-  private onQuestionCallback: QuestionCallback | null = null;
-  private onQuestionErrorCallback: QuestionErrorCallback | null = null;
+  private onFormCallback: FormCallback | null = null;
+  private onFormRepliedCallback: FormRepliedCallback | null = null;
+  private onFormCancelledCallback: FormCancelledCallback | null = null;
   private onThinkingCallback: ThinkingCallback | null = null;
   private onTokensCallback: TokensCallback | null = null;
   private onCostCallback: CostCallback | null = null;
@@ -162,25 +152,11 @@ class SummaryAggregator {
   private onSessionRetryCallback: SessionRetryCallback | null = null;
   private onSessionIdleCallback: SessionIdleCallback | null = null;
   private onPermissionCallback: PermissionCallback | null = null;
-  private onSessionDiffCallback: SessionDiffCallback | null = null;
   private onFileChangeCallback: FileChangeCallback | null = null;
   private onClearedCallback: ClearedCallback | null = null;
-  // Optional async lookup to ask the opencode server "which partIDs in this
-  // message are type=reasoning?". Used at session.idle to strip reasoning
-  // text from the rendered final message — see comment in handleSessionIdle.
-  private messagePartTypeLookup:
-    | ((sessionID: string, messageID: string) => Promise<Map<string, string>>)
-    | null = null;
   private processedToolStates: Set<string> = new Set();
   private thinkingFiredForMessages: Set<string> = new Set();
   private deliveredExternalUserMessageIds: Set<string> = new Set();
-  private knownTextPartIds: Map<string, Set<string>> = new Map();
-  // Parts confirmed as reasoning by message.part.updated. Deltas for these
-  // partIDs are dropped (they're "thinking" content, not user-facing).
-  // Required because v1.15 emits deltas before the type-discriminator
-  // updated event for short reasoning streams — we tentatively apply as
-  // text, then rectify here once the updated arrives.
-  private knownReasoningPartIds: Map<string, Set<string>> = new Map();
   private bot: Bot | null = null;
   private chatId: number | null = null;
   private typingTimer: ReturnType<typeof setInterval> | null = null;
@@ -203,12 +179,6 @@ class SummaryAggregator {
     this.onCompleteCallback = callback;
   }
 
-  setMessagePartTypeLookup(
-    fn: (sessionID: string, messageID: string) => Promise<Map<string, string>>,
-  ): void {
-    this.messagePartTypeLookup = fn;
-  }
-
   setOnPartial(callback: MessagePartialCallback): void {
     this.onPartialCallback = callback;
   }
@@ -225,12 +195,16 @@ class SummaryAggregator {
     this.onToolFileCallback = callback;
   }
 
-  setOnQuestion(callback: QuestionCallback): void {
-    this.onQuestionCallback = callback;
+  setOnForm(callback: FormCallback): void {
+    this.onFormCallback = callback;
   }
 
-  setOnQuestionError(callback: QuestionErrorCallback): void {
-    this.onQuestionErrorCallback = callback;
+  setOnFormReplied(callback: FormRepliedCallback): void {
+    this.onFormRepliedCallback = callback;
+  }
+
+  setOnFormCancelled(callback: FormCancelledCallback): void {
+    this.onFormCancelledCallback = callback;
   }
 
   setOnThinking(callback: ThinkingCallback): void {
@@ -267,10 +241,6 @@ class SummaryAggregator {
 
   setOnPermission(callback: PermissionCallback): void {
     this.onPermissionCallback = callback;
-  }
-
-  setOnSessionDiff(callback: SessionDiffCallback): void {
-    this.onSessionDiffCallback = callback;
   }
 
   setOnFileChange(callback: FileChangeCallback): void {
@@ -317,73 +287,126 @@ class SummaryAggregator {
     }
   }
 
-  processEvent(event: Event): void {
-    const eventType = (event as unknown as { type: string }).type;
-
-    if (eventType === "message.part.delta") {
-      this.handleMessagePartDelta(event as unknown as MessagePartDeltaEventRaw);
-      return;
-    }
-
-    // Log all question-related events for debugging
-    if (event.type.startsWith("question.")) {
-      logger.info(
-        `[Aggregator] Question event: ${event.type}`,
-        JSON.stringify(event.properties, null, 2),
-      );
-    }
+  processEvent(event: V2Event): void {
+    const eventType = event.type;
 
     // Log all session-related events for debugging
-    if (event.type.startsWith("session.")) {
+    if (eventType.startsWith("session.")) {
       logger.debug(
-        `[Aggregator] Session event: ${event.type}`,
-        JSON.stringify(event.properties, null, 2),
+        `[Aggregator] Session event: ${eventType}`,
+        JSON.stringify((event as unknown as { data?: unknown }).data, null, 2),
       );
     }
 
     switch (event.type) {
       case "session.created":
-      case "session.updated":
+      case "session.renamed":
+      case "session.metadata.updated":
         this.handleSessionCreatedOrUpdated(event);
         break;
-      case "message.updated":
-        this.handleMessageUpdated(event);
+      case "session.text.started":
+        this.handleTextStarted(event);
         break;
-      case "message.part.updated":
-        this.handleMessagePartUpdated(event);
+      case "session.text.delta":
+        this.handleTextDelta(event);
         break;
+      case "session.text.ended":
+        this.handleTextEnded(event);
+        break;
+      case "session.reasoning.started":
+        this.handleReasoningStarted(event);
+        break;
+      case "session.tool.called":
+        this.handleToolCalled(event);
+        break;
+      case "session.tool.progress":
+        this.handleToolProgress(event);
+        break;
+      case "session.tool.success":
+      case "session.tool.failed":
+        this.handleToolTerminal(event);
+        break;
+      case "session.tool.input.started":
+      case "session.tool.input.delta":
+      case "session.tool.input.ended":
+        break; // streaming input — no aggregator action
       case "session.status":
         this.handleSessionStatus(event);
         break;
       case "session.idle":
         this.handleSessionIdle(event);
         break;
-      case "session.compacted":
-        this.handleSessionCompacted(event);
+      case "session.compaction.started":
+      case "session.compaction.ended":
+      case "session.compaction.delta":
+        this.handleSessionCompaction(event);
         break;
-      case "session.error":
-        this.handleSessionError(event);
+      case "session.execution.failed":
+        this.handleSessionExecutionFailed(event);
         break;
-      case "question.asked":
-        this.handleQuestionAsked(event);
+      case "session.execution.interrupted":
+        this.handleSessionExecutionInterrupted(event);
         break;
-      case "question.replied":
-        logger.info(`[Aggregator] Question replied: requestID=${event.properties.requestID}`);
+      case "session.retry.scheduled":
+        this.handleSessionRetryScheduled(event);
         break;
-      case "question.rejected":
-        logger.info(`[Aggregator] Question rejected: requestID=${event.properties.requestID}`);
+      case "session.usage.updated":
+        this.handleSessionUsageUpdated(event);
         break;
-      case "session.diff":
-        this.handleSessionDiff(event);
+      case "session.step.ended":
+        this.handleSessionStepEnded(event);
         break;
+      case "session.inbox.delivered":
+      case "session.inbox.enqueued":
+        this.handleSessionInboxDelivered(event);
+        break;
+      case "session.permissions":
+        break; // handled through permission.asked
       case "permission.asked":
         this.handlePermissionAsked(event);
         break;
       case "permission.replied":
-        logger.info(`[Aggregator] Permission replied: requestID=${event.properties.requestID}`);
+        logger.info(`[Aggregator] Permission replied: requestID=${(event as any).data?.id}`);
+        break;
+      case "form.created":
+        this.handleFormCreated(event);
+        break;
+      case "form.replied":
+        this.handleFormReplied(event);
+        break;
+      case "form.cancelled":
+        this.handleFormCancelled(event);
+        break;
+      case "session.step.started":
+      case "session.step.streamed":
+      case "session.step.failed":
+      case "session.reasoning.delta":
+      case "session.reasoning.ended":
+      case "session.compaction.failed":
+      case "session.shell.started":
+      case "session.shell.ended":
+      case "session.skill.activated":
+      case "session.agent.selected":
+      case "session.model.selected":
+      case "session.viewed":
+      case "session.deleted":
+      case "session.forked":
+      case "session.moved":
+      case "session.revert.staged":
+      case "session.revert.cleared":
+      case "session.revert.committed":
+      case "filesystem.changed":
+      case "reference.updated":
+      case "session.instructions.updated":
+      case "session.synthetic":
+      case "session.inbox.cancelled":
+      case "session.inbox.delivery.changed":
+      case "session.execution.started":
+      case "session.execution.succeeded":
+        // Handled elsewhere or no aggregator action needed
         break;
       default:
-        logger.debug(`[Aggregator] Unhandled event type: ${event.type}`);
+        logger.debug(`[Aggregator] Unhandled event type: ${eventType}`);
         break;
     }
   }
@@ -402,8 +425,6 @@ class SummaryAggregator {
     this.textMessageStates.clear();
     this.messages.clear();
     this.partHashes.clear();
-    this.knownTextPartIds.clear();
-    this.knownReasoningPartIds.clear();
     this.processedToolStates.clear();
     this.thinkingFiredForMessages.clear();
     this.deliveredExternalUserMessageIds.clear();
@@ -426,429 +447,267 @@ class SummaryAggregator {
     return this.trackedSessionParents.has(sessionId) && sessionId !== this.currentSessionId;
   }
 
-  private handleSessionCreatedOrUpdated(
-    event: Event & {
-      type: "session.created" | "session.updated";
-    },
-  ): void {
-    if (!this.currentSessionId) {
-      return;
+  private handleSessionCreatedOrUpdated(event: V2Event): void {
+    if (!this.currentSessionId) return;
+
+    let sessionID: string | undefined;
+    let parentID: string | undefined;
+    let title: string | undefined;
+
+    if (event.type === "session.created") {
+      sessionID = event.data.sessionID;
+      parentID = event.data.parentID;
+      title = event.data.title;
+    } else if (event.type === "session.renamed") {
+      sessionID = event.data.sessionID;
+      title = event.data.title;
+    } else if (event.type === "session.metadata.updated") {
+      sessionID = event.data.sessionID;
+      title = (event.data as { metadata?: { title?: string } }).metadata?.title;
     }
 
-    const { info } = event.properties;
-    if (!info.parentID) {
-      return;
-    }
+    if (!sessionID || !parentID) return;
+    if (!this.trackedSessionParents.has(parentID)) return;
+    if (sessionID === this.currentSessionId) return;
 
-    if (!this.trackedSessionParents.has(info.parentID)) {
-      return;
-    }
-
-    if (info.id === this.currentSessionId) {
-      return;
-    }
-
-    if (!this.trackedSessionParents.has(info.id)) {
-      this.subagentTracker.trackChildSession(info.id, info.parentID);
+    if (!this.trackedSessionParents.has(sessionID)) {
+      this.subagentTracker.trackChildSession(sessionID, parentID);
     }
 
     this.subagentTracker.handleChildSessionInfo({
-      id: info.id,
-      parentID: info.parentID,
-      title: info.title,
+      id: sessionID,
+      parentID,
+      title,
     });
   }
 
-  private handleMessageUpdated(
-    event: Event & {
-      type: "message.updated";
-    },
-  ): void {
-    const { info } = event.properties;
+  // ─── Text events (V2 native) ────────────────────────────────────────
 
-    if (
-      info.sessionID !== this.currentSessionId &&
-      !this.trackedSessionParents.has(info.sessionID) &&
-      info.role === "assistant"
-    ) {
-      this.subagentTracker.attachUnknownSessionToPendingSubagent(info.sessionID);
-    }
+  private handleTextStarted(event: V2Event): void {
+    if (event.type !== "session.text.started") return;
+    const { sessionID, assistantMessageID, ordinal } = event.data;
 
-    if (this.isTrackedChildSession(info.sessionID)) {
-      if (info.role === "assistant") {
-        const assistantInfo = info as {
-          sessionID: string;
-          providerID?: string;
-          modelID?: string;
-          agent?: string;
-          tokens?: {
-            input: number;
-            output: number;
-            reasoning: number;
-            cache: { read: number; write: number };
-          };
-          cost?: number;
-        };
-        this.subagentTracker.updateFromAssistantMessage(assistantInfo);
-      }
-      return;
-    }
+    if (sessionID !== this.currentSessionId && !this.isTrackedChildSession(sessionID)) return;
 
-    if (info.sessionID !== this.currentSessionId) {
-      return;
-    }
-
-    const messageID = info.id;
-
-    this.messages.set(messageID, { role: info.role });
-
-    if (info.role === "user") {
-      this.emitExternalUserInputIfReady(info.sessionID, messageID);
-      return;
-    }
-
-    if (info.role === "assistant") {
-      if (!this.textMessageStates.has(messageID)) {
-        this.textMessageStates.set(messageID, {
-          orderedPartIds: [],
-          partTexts: new Map(),
-          optimisticUpdateCount: 0,
-        });
+    if (sessionID === this.currentSessionId) {
+      const textState = this.getOrCreateTextMessageState(assistantMessageID);
+      if (!this.messages.has(assistantMessageID)) {
+        this.messages.set(assistantMessageID, { role: "assistant" });
         this.messageCount++;
         this.startTypingIndicator();
       }
-
-      const textState = this.getOrCreateTextMessageState(messageID);
-
-      const assistantMessage = info as {
-        agent?: string;
-        providerID?: string;
-        modelID?: string;
-        time?: { created: number; completed?: number };
-      };
-      const time = assistantMessage.time;
-      const isCompleted = Boolean(time?.completed);
-      const messageText = this.getCombinedMessageText(messageID);
-
-      if (!isCompleted && textState.optimisticUpdateCount === 1) {
-        this.emitPartialText(info.sessionID, messageID, messageText);
-      }
-
-      // Extract and report tokens for EVERY message.updated with token data
-      // (both intermediate and completed). This keeps keyboard context in sync.
-      const assistantInfo = info as {
-        tokens?: {
-          input: number;
-          output: number;
-          reasoning: number;
-          cache: { read: number; write: number };
-        };
-        cost?: number;
-      };
-
-      if (this.onTokensCallback && assistantInfo.tokens) {
-        const tokens: TokensInfo = {
-          input: assistantInfo.tokens.input,
-          output: assistantInfo.tokens.output,
-          reasoning: assistantInfo.tokens.reasoning,
-          cacheRead: assistantInfo.tokens.cache?.read || 0,
-          cacheWrite: assistantInfo.tokens.cache?.write || 0,
-        };
-        logger.debug(
-          `[Aggregator] Tokens: input=${tokens.input}, output=${tokens.output}, reasoning=${tokens.reasoning}, cacheRead=${tokens.cacheRead}, cacheWrite=${tokens.cacheWrite}, completed=${isCompleted}`,
-        );
-        this.onTokensCallback(tokens, isCompleted);
-      }
-
-      if (isCompleted) {
-        const finalText = messageText;
-
-        logger.debug(
-          `[Aggregator] Message part completed: messageId=${messageID}, textLength=${finalText.length}, totalParts=${textState.orderedPartIds.length}, session=${this.currentSessionId}`,
-        );
-
-        // Extract and report cost
-        if (this.onCostCallback && assistantInfo.cost !== undefined) {
-          logger.debug(`[Aggregator] Cost: $${assistantInfo.cost.toFixed(2)}`);
-          this.onCostCallback(assistantInfo.cost);
-        }
-
-        if (this.onCompleteCallback && finalText.length > 0) {
-          this.onCompleteCallback(this.currentSessionId!, messageID, finalText, {
-            agent: assistantMessage.agent,
-            providerID: assistantMessage.providerID,
-            modelID: assistantMessage.modelID,
-            createdAt: time?.created,
-            completedAt: time?.completed,
-          });
-        }
-
-          this.cleanupCompletedMessage(messageID);
-
-          logger.debug(
-            `[Aggregator] Message completed cleanup: remaining messages=${this.textMessageStates.size}`,
-          );
-        }
-
-      this.lastUpdated = Date.now();
+      // Use ordinal as partID to order text blocks
+      const partID = `text-${ordinal}`;
+      this.registerTextPart(assistantMessageID, partID);
     }
+    this.lastUpdated = Date.now();
   }
 
-  private handleMessagePartUpdated(
-    event: Event & {
-      type: "message.part.updated";
-    },
-  ): void {
-    const { part } = event.properties;
+  private handleTextDelta(event: V2Event): void {
+    if (event.type !== "session.text.delta") return;
+    const { sessionID, assistantMessageID, delta } = event.data;
 
-    if (
-      part.sessionID !== this.currentSessionId &&
-      !this.trackedSessionParents.has(part.sessionID) &&
-      part.type !== "subtask"
-    ) {
-      this.subagentTracker.attachUnknownSessionToPendingSubagent(part.sessionID);
+    if (sessionID !== this.currentSessionId) return;
+
+    const partID = `text-${(event as { data: { ordinal?: number } }).data.ordinal ?? 0}`;
+    this.registerTextPart(assistantMessageID, partID);
+
+    const state = this.getOrCreateTextMessageState(assistantMessageID);
+    const previous = state.partTexts.get(partID) || "";
+    state.partTexts.set(partID, previous + delta);
+
+    const combined = this.getCombinedMessageText(assistantMessageID);
+    if (!combined.trim()) return;
+
+    this.startTypingIndicator();
+    this.emitPartialText(sessionID, assistantMessageID, combined);
+    this.lastUpdated = Date.now();
+  }
+
+  private handleTextEnded(event: V2Event): void {
+    if (event.type !== "session.text.ended") return;
+    const { sessionID, assistantMessageID, ordinal, text } = event.data;
+
+    if (sessionID !== this.currentSessionId) return;
+
+    const partID = `text-${ordinal}`;
+
+    // Register the message if not already tracked
+    if (!this.messages.has(assistantMessageID)) {
+      this.messages.set(assistantMessageID, { role: "assistant" });
+      this.messageCount++;
+      this.startTypingIndicator();
     }
 
-    const isCurrentRootSession = part.sessionID === this.currentSessionId;
-    const isTrackedChildSession = this.isTrackedChildSession(part.sessionID);
+    this.registerTextPart(assistantMessageID, partID);
 
-    if (!isCurrentRootSession && !isTrackedChildSession) {
+    const state = this.getOrCreateTextMessageState(assistantMessageID);
+    state.partTexts.set(partID, text);
+
+    const combined = this.getCombinedMessageText(assistantMessageID);
+    if (!combined.trim()) return;
+
+    this.emitPartialText(sessionID, assistantMessageID, combined);
+    this.lastUpdated = Date.now();
+  }
+
+  private handleReasoningStarted(event: V2Event): void {
+    if (event.type !== "session.reasoning.started") return;
+    const { sessionID, assistantMessageID } = event.data;
+
+    if (sessionID !== this.currentSessionId) return;
+
+    if (!this.thinkingFiredForMessages.has(assistantMessageID)) {
+      this.thinkingFiredForMessages.add(assistantMessageID);
+      if (this.onThinkingCallback) {
+        const callback = this.onThinkingCallback;
+        setImmediate(() => {
+          if (typeof callback === "function") {
+            callback(sessionID);
+          }
+        });
+      }
+    }
+    this.lastUpdated = Date.now();
+  }
+
+  // ─── Tool events (V2 native) ────────────────────────────────────────
+
+  private handleToolCalled(event: V2Event): void {
+    if (event.type !== "session.tool.called") return;
+    const { sessionID, assistantMessageID, id, input, executed } = event.data;
+
+    const isCurrentRoot = sessionID === this.currentSessionId;
+    const isTrackedChild = this.isTrackedChildSession(sessionID);
+
+    if (!isCurrentRoot && !isTrackedChild) {
+      this.subagentTracker.attachUnknownSessionToPendingSubagent(sessionID);
       return;
     }
 
-    if (part.type === "subtask") {
-      this.subagentTracker.registerSubtaskPart(
-        part.sessionID,
-        part.id,
-        part.agent,
-        part.description,
-        part.prompt,
-        part.command,
+    const toolName = (input as Record<string, unknown>)?.tool as string | undefined;
+
+    if (isTrackedChild) {
+      if (toolName === "task") {
+        this.subagentTracker.updateFromTaskTool(sessionID, input as { [key: string]: unknown });
+      }
+      this.subagentTracker.updateToolState(
+        sessionID,
+        { status: "running", input: input as { [key: string]: unknown } },
+        toolName ?? "unknown",
+        input as { [key: string]: unknown },
+        undefined,
       );
       this.lastUpdated = Date.now();
       return;
     }
 
-    if (isTrackedChildSession) {
-      if (part.type === "tool") {
-        const state = part.state;
-        const input = "input" in state ? (state.input as { [key: string]: unknown }) : undefined;
-        const title = "title" in state ? state.title : undefined;
-        this.subagentTracker.updateToolState(part.sessionID, state, part.tool, input, title);
-      }
-
-      if (part.type === "step-start") {
-        this.subagentTracker.updateStepStart(part.sessionID, part.snapshot);
-      }
-
-      if (part.type === "step-finish") {
-        this.subagentTracker.updateStepFinish(part.sessionID, part.tokens, part.cost, part.snapshot);
-      }
-
-      this.lastUpdated = Date.now();
-      return;
+    // Root session tool tracking
+    if (toolName === "task") {
+      this.subagentTracker.updateFromTaskTool(sessionID, input as { [key: string]: unknown });
     }
 
-    const messageID = part.messageID;
-    const messageInfo = this.messages.get(messageID);
-
-    if (part.type === "text") {
-      this.registerKnownTextPart(messageID, part.id);
-      this.registerTextPart(messageID, part.id);
-    }
-
-    const deltaFromUpdated = (event.properties as { delta?: unknown }).delta;
-    if (
-      part.type === "text" &&
-      typeof deltaFromUpdated === "string" &&
-      deltaFromUpdated.length > 0
-    ) {
-      this.applyTextDelta(part.sessionID, messageID, part.id, deltaFromUpdated, part.text);
-      this.lastUpdated = Date.now();
-      return;
-    }
-
-    if (part.type === "reasoning") {
-      // Confirm this partID is reasoning so future deltas for it get dropped.
-      this.registerKnownReasoningPart(messageID, part.id);
-      // Rectify: if deltas arrived before this update and were optimistically
-      // applied as text, remove them now. Without this, short reasoning leaks
-      // into the user-facing chat (issue with qwen, deepseek, sonnet w/o
-      // extended thinking).
-      this.unapplyMistakenlyTextPart(part.sessionID, messageID, part.id);
-      // Fire the thinking callback once per message on the first reasoning part.
-      // This is the signal that the model is actually doing extended thinking.
-      // Track the message regardless of whether a callback is registered, so
-      // thinkingFiredForMessages stays consistent even when onThinkingCallback is null.
-      if (!this.thinkingFiredForMessages.has(messageID)) {
-        this.thinkingFiredForMessages.add(messageID);
-        if (this.onThinkingCallback) {
-          const callback = this.onThinkingCallback;
-          const sessionID = part.sessionID;
-          setImmediate(() => {
-            if (typeof callback === "function") {
-              callback(sessionID);
-            }
-          });
-        }
-      }
-    } else if (part.type === "text" && "text" in part && part.text) {
-      const wasUpdated =
-        messageInfo && messageInfo.role === "assistant"
-          ? this.setTextPartSnapshot(messageID, part.id, part.text)
-          : this.setOptimisticTextSnapshot(messageID, part.id, part.text);
-      if (!wasUpdated) {
-        return;
-      }
-
-      const fullText = this.getCombinedMessageText(messageID);
-
-      if (messageInfo && messageInfo.role === "assistant") {
-        this.startTypingIndicator();
-        this.emitPartialText(part.sessionID, messageID, fullText);
-      } else if (messageInfo && messageInfo.role === "user") {
-        this.emitExternalUserInputIfReady(part.sessionID, messageID);
-      } else {
-        const state = this.getOrCreateTextMessageState(messageID);
-        state.optimisticUpdateCount++;
-
-        if (state.optimisticUpdateCount >= 2) {
-          this.emitPartialText(part.sessionID, messageID, fullText);
-        }
-      }
-    } else if (part.type === "tool") {
-      const state = part.state;
-      const input = "input" in state ? (state.input as { [key: string]: unknown }) : undefined;
-      const title = "title" in state ? state.title : undefined;
-
-      if (part.tool === "task") {
-        this.subagentTracker.updateFromTaskTool(part.sessionID, input);
-      }
-
-      logger.debug(
-        `[Aggregator] Tool event: callID=${part.callID}, tool=${part.tool}, status=${"status" in state ? state.status : "unknown"}`,
-      );
-
-      if (part.tool === "question") {
-        logger.debug(`[Aggregator] Question tool part update:`, JSON.stringify(part, null, 2));
-
-        // If the question tool fails, clear the active poll
-        // so the agent can recreate it with corrected data
-        if ("status" in state && state.status === "error") {
-          logger.info(
-            `[Aggregator] Question tool failed with error, clearing active poll. callID=${part.callID}`,
-          );
-          if (this.onQuestionErrorCallback) {
-            setImmediate(() => {
-              this.onQuestionErrorCallback!();
-            });
-          }
-          return;
-        }
-
-        // NOTE: Questions are now handled via "question.asked" event, not via tool part updates.
-        // This ensures we have access to the requestID needed for question.reply().
-      }
-
-      if ("status" in state && state.status === "completed") {
-        logger.debug(
-          `[Aggregator] Tool completed: callID=${part.callID}, tool=${part.tool}`,
-          JSON.stringify(state, null, 2),
-        );
-
-        const completedKey = `completed-${part.callID}`;
-
-        if (!this.processedToolStates.has(completedKey)) {
-          this.processedToolStates.add(completedKey);
-
-          const preparedFileContext = this.prepareToolFileContext(
-            part.tool,
-            input,
-            title,
-            state.metadata as { [key: string]: unknown } | undefined,
-          );
-
-          const toolData: ToolInfo = {
-            sessionId: part.sessionID,
-            messageId: messageID,
-            callId: part.callID,
-            tool: part.tool,
-            state: part.state,
-            input,
-            title,
-            metadata: state.metadata as { [key: string]: unknown },
-            hasFileAttachment: !!preparedFileContext.fileData,
-          };
-
-          logger.debug(
-            `[Aggregator] Sending tool notification to Telegram: tool=${part.tool}, title=${title || "N/A"}`,
-          );
-
-          if (this.onToolCallback) {
-            this.onToolCallback(toolData);
-          }
-
-          if (preparedFileContext.fileData && this.onToolFileCallback) {
-            logger.debug(
-              `[Aggregator] Sending ${part.tool} file: ${preparedFileContext.fileData.filename} (${preparedFileContext.fileData.buffer.length} bytes)`,
-            );
-            this.onToolFileCallback({
-              ...toolData,
-              hasFileAttachment: true,
-              fileData: preparedFileContext.fileData,
-            });
-          }
-
-          if (preparedFileContext.fileChange && this.onFileChangeCallback) {
-            this.onFileChangeCallback(preparedFileContext.fileChange);
-          }
-        }
-      }
-    }
+    const toolData: ToolInfo = {
+      sessionId: sessionID,
+      messageId: assistantMessageID,
+      callId: id,
+      tool: toolName ?? "unknown",
+      state: { status: "running", input: input as { [key: string]: unknown } },
+      input: input as { [key: string]: unknown },
+    };
 
     this.lastUpdated = Date.now();
   }
 
-  private handleMessagePartDelta(event: MessagePartDeltaEventRaw): void {
-    const part = event.properties.part;
-    const sessionID = part?.sessionID || event.properties.sessionID;
-    const messageID = part?.messageID || event.properties.messageID;
-    const partID = part?.id || event.properties.partID || "text";
-    const delta = event.properties.delta;
+  private handleToolProgress(event: V2Event): void {
+    if (event.type !== "session.tool.progress") return;
+    const { sessionID, id, metadata } = event.data;
 
-    if (!sessionID || !messageID || typeof delta !== "string" || delta.length === 0) {
+    if (sessionID !== this.currentSessionId && !this.isTrackedChildSession(sessionID)) return;
+
+    if (this.isTrackedChildSession(sessionID)) {
+      const toolName = (metadata as Record<string, unknown>)?.tool as string | undefined;
+      this.subagentTracker.updateToolState(
+        sessionID,
+        { status: "running" },
+        toolName ?? "unknown",
+        undefined,
+        (metadata as Record<string, unknown>)?.title as string | undefined,
+      );
+    }
+    this.lastUpdated = Date.now();
+  }
+
+  private handleToolTerminal(event: V2Event): void {
+    const isFailed = event.type === "session.tool.failed";
+    if (event.type !== "session.tool.success" && !isFailed) return;
+    const { sessionID, assistantMessageID, id, metadata } = event.data;
+
+    const isCurrentRoot = sessionID === this.currentSessionId;
+    const isTrackedChild = this.isTrackedChildSession(sessionID);
+
+    if (!isCurrentRoot && !isTrackedChild) return;
+
+    const input = isFailed
+      ? (event.data as { input?: { [key: string]: unknown } }).input
+      : undefined;
+    const toolName = (metadata as Record<string, unknown>)?.tool as string | undefined;
+
+    if (isTrackedChild) {
+      this.subagentTracker.updateToolState(
+        sessionID,
+        { status: isFailed ? "error" : "completed" },
+        toolName ?? "unknown",
+        input as { [key: string]: unknown } | undefined,
+        (metadata as Record<string, unknown>)?.title as string | undefined,
+      );
+      this.lastUpdated = Date.now();
       return;
     }
 
-    // v1.15.0 emits `field: "text"` for BOTH text-deltas and reasoning-deltas
-    // (the field refers to the Part schema's `.text` slot, not the Part's type).
-    // So we cannot use the delta event to discriminate part type — rely on
-    // `knownTextPartIds`, which `handleMessagePartUpdated` populates from
-    // `message.part.updated.properties.part.type === "text"`. That is the
-    // real Part-type discriminator and fires before deltas for the same part.
-    // EDGE CASE: with short reasoning streams (qwen, deepseek, Claude Sonnet
-    // in non-thinking mode), the deltas can arrive before the
-    // `message.part.updated` that says `type=reasoning`. We optimistically
-    // apply them as text below, then `handleMessagePartUpdated` rectifies
-    // by removing the wrongly-accumulated text when it confirms reasoning.
-    const knownReasoningIds = this.knownReasoningPartIds.get(messageID);
-    if (knownReasoningIds?.has(partID)) {
-      return; // already confirmed as reasoning — drop
-    }
-    const knownTextIds = this.knownTextPartIds.get(messageID);
-    const isKnownTextPart = knownTextIds?.has(partID) ?? false;
-    const thinkingFired = this.thinkingFiredForMessages.has(messageID);
+    // Root session: fire onToolCallback
+    const completedKey = `completed-${id}`;
+    if (!this.processedToolStates.has(completedKey)) {
+      this.processedToolStates.add(completedKey);
 
-    if (thinkingFired && !isKnownTextPart) {
-      return;
-    }
+      const toolData: ToolInfo = {
+        sessionId: sessionID,
+        messageId: assistantMessageID,
+        callId: id,
+        tool: toolName ?? "unknown",
+        state: {
+          status: isFailed ? "error" : "completed",
+          input: input as { [key: string]: unknown } | undefined,
+          error: isFailed ? (event.data as { error?: unknown }).error : undefined,
+          metadata: metadata as { [key: string]: unknown } | undefined,
+        },
+        input: input as { [key: string]: unknown } | undefined,
+        metadata: metadata as { [key: string]: unknown } | undefined,
+        hasFileAttachment: false,
+      };
 
-    if (!thinkingFired && !isKnownTextPart) {
-      this.registerKnownTextPart(messageID, partID);
-      this.registerTextPart(messageID, partID);
-    }
+      if (this.onToolCallback) {
+        this.onToolCallback(toolData);
+      }
 
-    this.applyTextDelta(sessionID, messageID, partID, delta, part?.text);
+      const preparedFileContext = this.prepareToolFileContext(
+        toolData.tool,
+        toolData.input,
+        toolData.title,
+        toolData.metadata,
+      );
+      if (preparedFileContext.fileData && this.onToolFileCallback) {
+        this.onToolFileCallback({
+          ...toolData,
+          hasFileAttachment: true,
+          fileData: preparedFileContext.fileData,
+        });
+      }
+      if (preparedFileContext.fileChange && this.onFileChangeCallback) {
+        this.onFileChangeCallback(preparedFileContext.fileChange);
+      }
+    }
+    this.lastUpdated = Date.now();
   }
 
   private applyTextDelta(
@@ -858,33 +717,25 @@ class SummaryAggregator {
     delta: string,
     fullTextHint?: string,
   ): void {
-    if (sessionID !== this.currentSessionId) {
-      return;
-    }
-
+    if (sessionID !== this.currentSessionId) return;
     this.registerTextPart(messageID, partID);
 
     const state = this.getOrCreateTextMessageState(messageID);
     const previous = state.partTexts.get(partID) || "";
     let accumulated = `${previous}${delta}`;
-
     if (typeof fullTextHint === "string" && fullTextHint.length > accumulated.length) {
       accumulated = fullTextHint;
     }
-
     state.partTexts.set(partID, accumulated);
 
     const combined = this.getCombinedMessageText(messageID);
-    if (!combined.trim()) {
-      return;
-    }
+    if (!combined.trim()) return;
 
     const messageInfo = this.messages.get(messageID);
     if (messageInfo?.role === "user") {
       this.emitExternalUserInputIfReady(sessionID, messageID);
       return;
     }
-
     this.startTypingIndicator();
     this.emitPartialText(sessionID, messageID, combined);
   }
@@ -893,24 +744,15 @@ class SummaryAggregator {
     if (sessionId !== this.currentSessionId || this.deliveredExternalUserMessageIds.has(messageId)) {
       return;
     }
-
     const messageInfo = this.messages.get(messageId);
-    if (!messageInfo || messageInfo.role !== "user") {
-      return;
-    }
-
+    if (!messageInfo || messageInfo.role !== "user") return;
     const messageText = this.getCombinedMessageText(messageId).trim();
-    if (!messageText) {
-      return;
-    }
+    if (!messageText) return;
 
     this.deliveredExternalUserMessageIds.add(messageId);
     this.cleanupCompletedMessage(messageId);
 
-    if (!this.onExternalUserInputCallback) {
-      return;
-    }
-
+    if (!this.onExternalUserInputCallback) return;
     const callback = this.onExternalUserInputCallback;
     setImmediate(() => {
       Promise.resolve(callback(sessionId, messageId, messageText)).catch((err) => {
@@ -923,20 +765,13 @@ class SummaryAggregator {
     this.textMessageStates.delete(messageId);
     this.messages.delete(messageId);
     this.partHashes.delete(messageId);
-    this.knownTextPartIds.delete(messageId);
-    this.knownReasoningPartIds.delete(messageId);
-
     if (this.textMessageStates.size === 0) {
-      logger.debug("[Aggregator] No more active messages, stopping typing indicator");
       this.stopTypingIndicator();
     }
   }
 
   private emitPartialText(sessionId: string, messageId: string, messageText: string): void {
-    if (!this.onPartialCallback || !messageText.trim()) {
-      return;
-    }
-
+    if (!this.onPartialCallback || !messageText.trim()) return;
     try {
       this.onPartialCallback(sessionId, messageId, messageText);
     } catch (err) {
@@ -946,10 +781,7 @@ class SummaryAggregator {
 
   private getOrCreateTextMessageState(messageID: string): TextMessageState {
     const existing = this.textMessageStates.get(messageID);
-    if (existing) {
-      return existing;
-    }
-
+    if (existing) return existing;
     const state: TextMessageState = {
       orderedPartIds: [],
       partTexts: new Map(),
@@ -959,94 +791,11 @@ class SummaryAggregator {
     return state;
   }
 
-  private registerKnownTextPart(messageID: string, partID: string): void {
-    if (!this.knownTextPartIds.has(messageID)) {
-      this.knownTextPartIds.set(messageID, new Set());
-    }
-
-    this.knownTextPartIds.get(messageID)!.add(partID);
-  }
-
-  private registerKnownReasoningPart(messageID: string, partID: string): void {
-    if (!this.knownReasoningPartIds.has(messageID)) {
-      this.knownReasoningPartIds.set(messageID, new Set());
-    }
-
-    this.knownReasoningPartIds.get(messageID)!.add(partID);
-  }
-
-  /**
-   * Undo the optimistic "applied as text" of a partID we now know was
-   * reasoning. Strips it from textMessageStates and re-emits the corrected
-   * combined text. Idempotent — safe to call when the part was never
-   * applied as text (early return on no-op).
-   */
-  private unapplyMistakenlyTextPart(
-    sessionID: string,
-    messageID: string,
-    partID: string,
-  ): void {
-    const textIds = this.knownTextPartIds.get(messageID);
-    const wasTreatedAsText = textIds?.has(partID) ?? false;
-    if (wasTreatedAsText) {
-      textIds!.delete(partID);
-    }
-
-    const state = this.textMessageStates.get(messageID);
-    if (!state) return;
-
-    const hadPart = state.partTexts.has(partID) || state.orderedPartIds.includes(partID);
-    if (!hadPart) return;
-
-    state.partTexts.delete(partID);
-    state.orderedPartIds = state.orderedPartIds.filter((id) => id !== partID);
-
-    // Re-emit corrected partial. If combined is now empty, the streamer
-    // gates on `messageText.trim()` and skips the edit — no harm done.
-    const messageInfo = this.messages.get(messageID);
-    if (messageInfo?.role !== "assistant") return;
-    const combined = this.getCombinedMessageText(messageID);
-    this.emitPartialText(sessionID, messageID, combined);
-  }
-
   private registerTextPart(messageID: string, partID: string): void {
     const state = this.getOrCreateTextMessageState(messageID);
     if (!state.orderedPartIds.includes(partID)) {
       state.orderedPartIds.push(partID);
     }
-  }
-
-  private setTextPartSnapshot(messageID: string, partID: string, text: string): boolean {
-    const normalized = text;
-    const partHash = this.hashString(`${partID}\n${normalized}`);
-
-    if (!this.partHashes.has(messageID)) {
-      this.partHashes.set(messageID, new Set());
-    }
-
-    const hashes = this.partHashes.get(messageID)!;
-    if (hashes.has(partHash)) {
-      return false;
-    }
-
-    hashes.add(partHash);
-
-    this.registerTextPart(messageID, partID);
-    const state = this.getOrCreateTextMessageState(messageID);
-    state.partTexts.set(partID, normalized);
-    return true;
-  }
-
-  private setOptimisticTextSnapshot(messageID: string, partID: string, text: string): boolean {
-    const wasUpdated = this.setTextPartSnapshot(messageID, partID, text);
-    if (!wasUpdated) {
-      return false;
-    }
-
-    const state = this.getOrCreateTextMessageState(messageID);
-    state.orderedPartIds = [partID];
-    state.partTexts = new Map([[partID, text]]);
-    return true;
   }
 
   private getCombinedMessageText(messageID: string): string {
@@ -1175,109 +924,51 @@ class SummaryAggregator {
     return hash.toString(36);
   }
 
-  private handleSessionStatus(
-    event: Event & {
-      type: "session.status";
-    },
-  ): void {
-    const { sessionID, status } = event.properties as {
-      sessionID: string;
-      status?: {
-        type?: string;
-        attempt?: number;
-        message?: string;
-        next?: number;
-      };
-    };
+  private handleSessionStatus(event: V2Event): void {
+    if (event.type !== "session.status") return;
+    const { sessionID, status } = event.data;
 
-    if (sessionID !== this.currentSessionId) {
-      return;
-    }
+    if (sessionID !== this.currentSessionId) return;
 
-    if (status?.type !== "retry" || !this.onSessionRetryCallback) {
-      return;
-    }
-
-    const callback = this.onSessionRetryCallback;
-    const message = status.message?.trim() || "Unknown retry error";
-
-    logger.warn(
-      `[Aggregator] Session retry: session=${sessionID}, attempt=${status.attempt ?? "n/a"}, message=${message}`,
-    );
-
-    setImmediate(() => {
-      callback({
-        sessionId: sessionID,
-        attempt: status.attempt,
-        message,
-        next: status.next,
+    // Only retry status needs aggregator attention
+    if (status.type === "retry" && this.onSessionRetryCallback) {
+      const callback = this.onSessionRetryCallback;
+      const message = status.message?.trim() || "Unknown retry error";
+      setImmediate(() => {
+        callback({
+          sessionId: sessionID,
+          attempt: status.attempt,
+          message,
+          next: status.next,
+        });
       });
-    });
+    }
   }
 
-  private handleSessionIdle(
-    event: Event & {
-      type: "session.idle";
-    },
-  ): void {
-    const { sessionID } = event.properties;
+  private handleSessionIdle(event: V2Event): void {
+    if (event.type !== "session.idle") return;
+    const { sessionID } = event.data;
 
     if (this.isTrackedChildSession(sessionID)) {
-      logger.info(`[Aggregator] Subagent session became idle: ${sessionID}`);
       this.subagentTracker.setTerminalStatus(sessionID, "completed");
       return;
     }
 
-    if (sessionID !== this.currentSessionId) {
-      return;
-    }
+    if (sessionID !== this.currentSessionId) return;
 
-    logger.info(`[Aggregator] Session became idle: ${sessionID}`);
-
-    // Stop typing indicator when session goes idle
     this.stopTypingIndicator();
 
-    // SDK v2 1.15.0 ya no emite `message.updated` con `time.completed` durante
-    // streaming — solo manda `message.part.delta` y luego `session.idle`. Sin
-    // este flush, `onCompleteCallback` no se dispararía nunca y todo lo que
-    // dependa de él (TTS, footer con modelo/agent, run-state cleanup) queda
-    // huérfano. Drenamos cualquier mensaje acumulado en textMessageStates aquí.
-    //
-    // ANTES de drenar, si tenemos un lookup configurado, le preguntamos al
-    // server qué partes son `reasoning` y las stripamos. El SDK NO emite
-    // `message.part.updated` con type=reasoning en tiempo real (al menos para
-    // razonamientos cortos), así que el aggregator no puede discriminarlas
-    // por sí solo — todos los deltas llegan con `field=text` y `type=?`. El
-    // server SÍ las tiene categorizadas en su storage.
+    // Flush any accumulated assistant messages
     if (this.onCompleteCallback && this.textMessageStates.size > 0) {
       const messagesToFlush = Array.from(this.textMessageStates.keys());
       const callback = this.onCompleteCallback;
-      const lookup = this.messagePartTypeLookup;
       const flushImpl = async () => {
         for (const messageID of messagesToFlush) {
-          if (lookup) {
-            try {
-              const partTypes = await lookup(sessionID, messageID);
-              for (const [partID, type] of partTypes) {
-                if (type === "reasoning") {
-                  this.unapplyMistakenlyTextPart(sessionID, messageID, partID);
-                }
-              }
-            } catch (err) {
-              logger.warn(
-                `[Aggregator] Reasoning strip lookup failed for ${messageID}; will deliver as-is:`,
-                err,
-              );
-            }
-          }
           const finalText = this.getCombinedMessageText(messageID);
           if (!finalText.trim()) {
             this.cleanupCompletedMessage(messageID);
             continue;
           }
-          logger.debug(
-            `[Aggregator] Flushing pending assistant message on session.idle: messageId=${messageID}, textLength=${finalText.length}`,
-          );
           try {
             callback(sessionID, messageID, finalText, {});
           } catch (err) {
@@ -1286,11 +977,6 @@ class SummaryAggregator {
           this.cleanupCompletedMessage(messageID);
         }
       };
-      // El idle callback DEBE dispararse DESPUÉS de que el flush termine,
-      // porque el handler de TTS depende del texto acumulado durante
-      // onCompleteCallback (waitForIdle mode). Si fuera al revés, el idle
-      // callback corre flushTtsText antes de que onComplete acumule —
-      // resultado: no se envía audio.
       const idleCb = this.onSessionIdleCallback;
       flushImpl()
         .catch((err) => {
@@ -1312,21 +998,11 @@ class SummaryAggregator {
     }
   }
 
-  private handleSessionCompacted(
-    event: Event & {
-      type: "session.compacted";
-    },
-  ): void {
-    const properties = event.properties as { sessionID: string };
-    const { sessionID } = properties;
+  private handleSessionCompaction(event: V2Event): void {
+    if (event.type !== "session.compaction.ended") return;
+    const { sessionID } = event.data;
+    if (sessionID !== this.currentSessionId) return;
 
-    if (sessionID !== this.currentSessionId) {
-      return;
-    }
-
-    logger.info(`[Aggregator] Session compacted: ${sessionID}`);
-
-    // Reload context from history after compaction
     if (this.onSessionCompactedCallback) {
       setImmediate(() => {
         const project = getCurrentProject();
@@ -1337,34 +1013,18 @@ class SummaryAggregator {
     }
   }
 
-  private handleSessionError(
-    event: Event & {
-      type: "session.error";
-    },
-  ): void {
-    const { sessionID, error } = event.properties as {
-      sessionID: string;
-      error?: {
-        name?: string;
-        message?: string;
-        data?: { message?: string };
-      };
-    };
+  private handleSessionExecutionFailed(event: V2Event): void {
+    if (event.type !== "session.execution.failed") return;
+    const { sessionID, error } = event.data;
 
-    const message =
-      error?.data?.message || error?.message || error?.name || "Unknown session error";
+    const message = error?.message || "Unknown session error";
 
-    if (sessionID && this.isTrackedChildSession(sessionID)) {
-      logger.warn(`[Aggregator] Subagent session error: ${sessionID}: ${message}`);
+    if (this.isTrackedChildSession(sessionID)) {
       this.subagentTracker.setTerminalStatus(sessionID, "error", message);
       return;
     }
 
-    if (sessionID !== this.currentSessionId) {
-      return;
-    }
-
-    logger.warn(`[Aggregator] Session error: ${sessionID}: ${message}`);
+    if (sessionID !== this.currentSessionId) return;
     this.stopTypingIndicator();
 
     if (this.onSessionErrorCallback) {
@@ -1375,83 +1035,165 @@ class SummaryAggregator {
     }
   }
 
-  private handleQuestionAsked(
-    event: Event & {
-      type: "question.asked";
-    },
-  ): void {
-    const { id, sessionID, questions } = event.properties;
+  private handleSessionExecutionInterrupted(event: V2Event): void {
+    if (event.type !== "session.execution.interrupted") return;
+    const { sessionID } = event.data;
 
-    if (sessionID !== this.currentSessionId) {
-      logger.debug(
-        `[Aggregator] Ignoring question.asked for different session: ${sessionID} (current: ${this.currentSessionId})`,
-      );
+    if (this.isTrackedChildSession(sessionID)) {
+      this.subagentTracker.setTerminalStatus(sessionID, "error", "interrupted");
       return;
     }
 
-    logger.info(`[Aggregator] Question asked: requestID=${id}, questions=${questions.length}`);
+    if (sessionID !== this.currentSessionId) return;
+    this.stopTypingIndicator();
 
-    if (this.onQuestionCallback) {
-      const callback = this.onQuestionCallback;
+    if (this.onSessionErrorCallback) {
+      const callback = this.onSessionErrorCallback;
+      setImmediate(() => {
+        callback(sessionID, "Session interrupted");
+      });
+    }
+  }
+
+  private handleSessionRetryScheduled(event: V2Event): void {
+    if (event.type !== "session.retry.scheduled") return;
+    const { sessionID } = event.data;
+
+    if (sessionID !== this.currentSessionId) return;
+    // Retry info is part of session.status with type=retry, handled there
+  }
+
+  private handleSessionUsageUpdated(event: V2Event): void {
+    if (event.type !== "session.usage.updated") return;
+    const { sessionID, tokens, cost } = event.data;
+
+    if (sessionID !== this.currentSessionId) return;
+
+    if (this.onTokensCallback && tokens) {
+      const tokensInfo: TokensInfo = {
+        input: tokens.input,
+        output: tokens.output,
+        reasoning: tokens.reasoning,
+        cacheRead: tokens.cache?.read ?? 0,
+        cacheWrite: tokens.cache?.write ?? 0,
+      };
+      this.onTokensCallback(tokensInfo, true);
+    }
+
+    if (this.onCostCallback && cost !== undefined) {
+      this.onCostCallback(cost);
+    }
+  }
+
+  private handleSessionStepEnded(event: V2Event): void {
+    if (event.type !== "session.step.ended") return;
+    const { sessionID, cost, tokens } = event.data;
+
+    if (sessionID !== this.currentSessionId) return;
+
+    if (this.onTokensCallback && tokens) {
+      const tokensInfo: TokensInfo = {
+        input: tokens.input,
+        output: tokens.output,
+        reasoning: tokens.reasoning,
+        cacheRead: tokens.cache?.read ?? 0,
+        cacheWrite: tokens.cache?.write ?? 0,
+      };
+      this.onTokensCallback(tokensInfo, false);
+    }
+
+    if (this.onCostCallback && cost !== undefined) {
+      this.onCostCallback(cost);
+    }
+  }
+
+  private handleSessionInboxDelivered(event: V2Event): void {
+    if (event.type !== "session.inbox.delivered" && event.type !== "session.inbox.enqueued") return;
+    const { sessionID } = event.data;
+
+    if (sessionID !== this.currentSessionId) return;
+
+    // V2 uses inbox events for external user input. We emit a notification
+    // for now — the actual message text comes from the event stream via
+    // session.context, not from the event itself.
+    // This is a minimal bridge until full native user message support.
+    if (this.onExternalUserInputCallback) {
+      const callback = this.onExternalUserInputCallback;
+      const inboxId = event.data.inboxID;
+      setImmediate(() => {
+        Promise.resolve(callback(sessionID, inboxId, "")).catch((err) => {
+          logger.error("[Aggregator] Error in external user input callback:", err);
+        });
+      });
+    }
+  }
+
+  private handleFormCreated(event: V2Event): void {
+    if (event.type !== "form.created") return;
+    const form = event.data.form as FormInfo;
+    const sessionID = form.sessionID;
+
+    if (sessionID !== this.currentSessionId) return;
+
+    if (this.onFormCallback) {
+      const callback = this.onFormCallback;
       setImmediate(async () => {
         try {
-          await callback(questions as Question[], id, sessionID);
+          await callback(form, sessionID);
         } catch (err) {
-          logger.error("[Aggregator] Error in question callback:", err);
+          logger.error("[Aggregator] Error in form callback:", err);
         }
       });
     }
   }
 
-  private handleSessionDiff(event: Event): void {
-    const properties = event.properties as {
-      sessionID: string;
-      diff: Array<{ file: string; additions: number; deletions: number }>;
-    };
+  private handleFormReplied(event: V2Event): void {
+    if (event.type !== "form.replied") return;
+    const { id, sessionID } = event.data;
 
-    if (properties.sessionID !== this.currentSessionId) {
-      return;
-    }
+    if (sessionID !== this.currentSessionId) return;
 
-    logger.debug(`[Aggregator] Session diff: ${properties.diff.length} files changed`);
-
-    if (this.onSessionDiffCallback) {
-      const diffs: FileChange[] = properties.diff.map((d) => ({
-        file: d.file,
-        additions: d.additions,
-        deletions: d.deletions,
-      }));
-
-      const callback = this.onSessionDiffCallback;
-      setImmediate(() => {
-        callback(properties.sessionID, diffs);
+    if (this.onFormRepliedCallback) {
+      const callback = this.onFormRepliedCallback;
+      setImmediate(async () => {
+        try {
+          await callback(id, sessionID);
+        } catch (err) {
+          logger.error("[Aggregator] Error in form replied callback:", err);
+        }
       });
     }
   }
 
-  private handlePermissionAsked(
-    event: Event & {
-      type: "permission.asked";
-    },
-  ): void {
-    const request = event.properties;
+  private handleFormCancelled(event: V2Event): void {
+    if (event.type !== "form.cancelled") return;
+    const { id, sessionID } = event.data;
 
-    if (request.sessionID !== this.currentSessionId) {
-      logger.debug(
-        `[Aggregator] Ignoring permission.asked for different session: ${request.sessionID} (current: ${this.currentSessionId})`,
-      );
-      return;
+    if (sessionID !== this.currentSessionId) return;
+
+    if (this.onFormCancelledCallback) {
+      const callback = this.onFormCancelledCallback;
+      setImmediate(async () => {
+        try {
+          await callback(id, sessionID);
+        } catch (err) {
+          logger.error("[Aggregator] Error in form cancelled callback:", err);
+        }
+      });
     }
+  }
 
-    logger.info(
-      `[Aggregator] Permission asked: requestID=${request.id}, type=${request.permission}, patterns=${request.patterns.length}`,
-    );
+  private handlePermissionAsked(event: V2Event): void {
+    if (event.type !== "permission.asked") return;
+    const request = event.data;
+
+    if (request.sessionID !== this.currentSessionId) return;
 
     if (this.onPermissionCallback) {
       const callback = this.onPermissionCallback;
       setImmediate(async () => {
         try {
-          await callback(request as PermissionRequest);
+          await callback(request as unknown as PermissionRequest);
         } catch (err) {
           logger.error("[Aggregator] Error in permission callback:", err);
         }

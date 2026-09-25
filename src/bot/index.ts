@@ -33,14 +33,14 @@ import { mcpsCommand, handleMcpsCallback } from "./commands/mcps.js";
 import { ttsCommand } from "./commands/tts.js";
 import { registerMemoryCommands } from "./commands/memory-commands.js";
 import { clearSessionTracker } from "../memory/session-tracker.js";
-import { handleQuestionCallback, handleQuestionTextAnswer } from "./handlers/question.js";
 import { handlePermissionCallback } from "./handlers/permission.js";
+import { handleFormCallback, handleFormTextAnswer } from "./handlers/form.js";
 import { handleAgentSelect } from "./handlers/agent.js";
 import { handleModelApiKeyInput, handleModelSelect } from "./handlers/model.js";
 import { handleVariantSelect } from "./handlers/variant.js";
 import { handleCompactConfirm } from "./handlers/context.js";
 import { handleInlineMenuCancel } from "./handlers/inline-menu.js";
-import { questionManager } from "../question/manager.js";
+import { formManager } from "../form/manager.js";
 import { interactionManager } from "../interaction/manager.js";
 import { clearAllInteractionState } from "../interaction/cleanup.js";
 import { stopEventListening } from "../opencode/events.js";
@@ -53,7 +53,7 @@ import { processUserPrompt } from "./handlers/prompt.js";
 import { handleVoiceMessage } from "./handlers/voice.js";
 import { handleDocumentMessage } from "./handlers/document.js";
 import { downloadTelegramFile, toDataUri } from "./utils/file-download.js";
-import type { FilePartInput } from "@opencode-ai/sdk/v2";
+import type { LegacyFilePart } from "../opencode/client-v2.js";
 import { assistantRunState } from "./assistant-run-state.js";
 import { clearSessionCompletionTasks } from "./session-task-queue.js";
 import type { StreamingMessagePayload } from "./streaming/response-streamer.js";
@@ -280,7 +280,7 @@ export function createBot(): Bot<Context> {
       const handledProject = await handleProjectSelect(ctx);
       const handledWorktree = await handleWorktreeCallback(ctx);
       const handledOpen = await handleOpenCallback(ctx);
-      const handledQuestion = await handleQuestionCallback(ctx);
+      const handledForm = await handleFormCallback(ctx);
       const handledPermission = await handlePermissionCallback(ctx);
       const handledAgent = await handleAgentSelect(ctx);
       const handledModel = await handleModelSelect(ctx);
@@ -298,7 +298,7 @@ export function createBot(): Bot<Context> {
       });
 
       logger.debug(
-        `[Bot] Callback handled: inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, worktree=${handledWorktree}, open=${handledOpen}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, task=${handledTask}, taskList=${handledTaskList}, rename=${handledRenameCancel}, commands=${handledCommands}, mcps=${handledMcps}, settings=${handledSettings}, cronDelivery=${handledCronDelivery}`,
+        `[Bot] Callback handled: inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, worktree=${handledWorktree}, open=${handledOpen}, form=${handledForm}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, task=${handledTask}, taskList=${handledTaskList}, rename=${handledRenameCancel}, commands=${handledCommands}, mcps=${handledMcps}, settings=${handledSettings}, cronDelivery=${handledCronDelivery}`,
       );
 
       if (
@@ -307,7 +307,7 @@ export function createBot(): Bot<Context> {
         !handledProject &&
         !handledWorktree &&
         !handledOpen &&
-        !handledQuestion &&
+        !handledForm &&
         !handledPermission &&
         !handledAgent &&
         !handledModel &&
@@ -416,7 +416,7 @@ export function createBot(): Bot<Context> {
       const dataUri = toDataUri(downloadedFile.buffer, "image/jpeg");
 
       // Create file part
-      const filePart: FilePartInput = {
+      const filePart: LegacyFilePart = {
         type: "file",
         mime: "image/jpeg",
         filename: "photo.jpg",
@@ -459,8 +459,8 @@ export function createBot(): Bot<Context> {
       return;
     }
 
-    if (questionManager.isActive()) {
-      await handleQuestionTextAnswer(ctx);
+    if (formManager.isActive()) {
+      await handleFormTextAnswer(ctx);
       return;
     }
 

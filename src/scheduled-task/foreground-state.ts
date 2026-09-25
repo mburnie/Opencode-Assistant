@@ -29,6 +29,10 @@ class ForegroundSessionState {
     return this.activeSessionIds.size > 0;
   }
 
+  getActiveSessionIds(): string[] {
+    return Array.from(this.activeSessionIds);
+  }
+
   clearAll(reason: string): void {
     if (this.activeSessionIds.size === 0) {
       return;

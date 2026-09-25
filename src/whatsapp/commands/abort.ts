@@ -1,4 +1,4 @@
-import { opencodeClient } from "../../opencode/client.js";
+import { interruptSession } from "../../opencode/client-v2.js";
 import { getCurrentSession } from "../../session/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { foregroundSessionState } from "../../scheduled-task/foreground-state.js";
@@ -27,10 +27,7 @@ export const abortCommand: WhatsAppCommandHandler = async (ctx) => {
   const timeout = setTimeout(() => controller.abort(), ABORT_TIMEOUT_MS);
 
   try {
-    const { data, error } = await opencodeClient.session.abort(
-      { sessionID: session.id, directory: session.directory },
-      { signal: controller.signal },
-    );
+    const { data, error } = await interruptSession(session.id, false);
     clearTimeout(timeout);
 
     if (error) {
@@ -39,7 +36,7 @@ export const abortCommand: WhatsAppCommandHandler = async (ctx) => {
       return;
     }
 
-    if (data === true) {
+    if (data) {
       foregroundSessionState.markIdle(session.id);
       assistantRunState.clearRun(session.id, "whatsapp_abort_confirmed");
       await ctx.reply("✅ Stopped.");

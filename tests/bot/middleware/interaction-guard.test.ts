@@ -3,7 +3,21 @@ import type { Context, NextFunction } from "grammy";
 import { interactionGuardMiddleware } from "../../../src/bot/middleware/interaction-guard.js";
 import { interactionManager } from "../../../src/interaction/manager.js";
 import { foregroundSessionState } from "../../../src/scheduled-task/foreground-state.js";
+import { attachManager } from "../../../src/attach/manager.js";
 import { t } from "../../../src/i18n/index.js";
+
+const mocked = vi.hoisted(() => ({
+  currentSession: null as { id: string; title: string; directory: string } | null,
+  getActiveSessionsMock: vi.fn(),
+}));
+
+vi.mock("../../../src/session/manager.js", () => ({
+  getCurrentSession: vi.fn(() => mocked.currentSession),
+}));
+
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  getActiveSessions: mocked.getActiveSessionsMock,
+}));
 
 function createTextContext(text: string): Context {
   return {
@@ -35,6 +49,9 @@ describe("interactionGuardMiddleware", () => {
   beforeEach(() => {
     interactionManager.clear("test_setup");
     foregroundSessionState.__resetForTests();
+    attachManager.__resetForTests();
+    mocked.currentSession = null;
+    mocked.getActiveSessionsMock.mockReset();
   });
 
   it("passes through when there is no active interaction", async () => {
@@ -334,5 +351,75 @@ describe("interactionGuardMiddleware", () => {
 
     expect(next).toHaveBeenCalledTimes(1);
     expect(ctx.answerCallbackQuery).not.toHaveBeenCalled();
+  });
+
+  it("reconciles stale attachManager busy state with OpenCode and allows input when idle", async () => {
+    mocked.currentSession = { id: "session-1", title: "Session", directory: "/repo" };
+    attachManager.attach("session-1", "/repo");
+    attachManager.markBusy("session-1");
+
+    mocked.getActiveSessionsMock.mockResolvedValue({
+      data: {},
+      error: null,
+    });
+
+    const ctx = createTextContext("hello");
+    const next: NextFunction = vi.fn().mockResolvedValue(undefined);
+
+    await interactionGuardMiddleware(ctx, next);
+
+    expect(mocked.getActiveSessionsMock).toHaveBeenCalledTimes(1);
+    expect(attachManager.isBusy()).toBe(false);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(ctx.reply).not.toHaveBeenCalled();
+  });
+
+  it("keeps input blocked when OpenCode confirms the session is running", async () => {
+    mocked.currentSession = { id: "session-1", title: "Session", directory: "/repo" };
+    attachManager.attach("session-1", "/repo");
+    attachManager.markBusy("session-1");
+
+    mocked.getActiveSessionsMock.mockResolvedValue({
+      data: { "session-1": { type: "running" } },
+      error: null,
+    });
+
+    const ctx = createTextContext("hello");
+    const next: NextFunction = vi.fn().mockResolvedValue(undefined);
+
+    await interactionGuardMiddleware(ctx, next);
+
+    expect(mocked.getActiveSessionsMock).toHaveBeenCalledTimes(1);
+    expect(attachManager.isBusy()).toBe(true);
+    expect(next).not.toHaveBeenCalled();
+    expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_busy"));
+  });
+
+  it("does not reconcile when attachManager is not busy", async () => {
+    mocked.currentSession = { id: "session-1", title: "Session", directory: "/repo" };
+    attachManager.attach("session-1", "/repo");
+
+    const ctx = createTextContext("hello");
+    const next: NextFunction = vi.fn().mockResolvedValue(undefined);
+
+    await interactionGuardMiddleware(ctx, next);
+
+    expect(mocked.getActiveSessionsMock).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reconcile when there is no current session", async () => {
+    attachManager.attach("session-1", "/repo");
+    attachManager.markBusy("session-1");
+
+    const ctx = createTextContext("hello");
+    const next: NextFunction = vi.fn().mockResolvedValue(undefined);
+
+    await interactionGuardMiddleware(ctx, next);
+
+    expect(mocked.getActiveSessionsMock).not.toHaveBeenCalled();
+    expect(attachManager.isBusy()).toBe(true);
+    expect(next).not.toHaveBeenCalled();
+    expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_busy"));
   });
 });

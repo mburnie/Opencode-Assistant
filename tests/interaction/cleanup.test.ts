@@ -1,20 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAllInteractionState } from "../../src/interaction/cleanup.js";
 import { interactionManager } from "../../src/interaction/manager.js";
-import { questionManager } from "../../src/question/manager.js";
 import { permissionManager } from "../../src/permission/manager.js";
 import { renameManager } from "../../src/rename/manager.js";
-import type { Question } from "../../src/question/types.js";
 import type { PermissionRequest } from "../../src/permission/types.js";
-
-const TEST_QUESTION: Question = {
-  header: "Q1",
-  question: "Pick one option",
-  options: [
-    { label: "Yes", description: "accept" },
-    { label: "No", description: "decline" },
-  ],
-};
 
 const TEST_PERMISSION: PermissionRequest = {
   id: "perm-1",
@@ -31,7 +20,6 @@ describe("interaction/cleanup", () => {
   });
 
   it("clears all interaction-related managers", () => {
-    questionManager.startQuestions([TEST_QUESTION], "req-1");
     permissionManager.startPermission(TEST_PERMISSION, 101);
     renameManager.startWaiting("session-1", "D:/repo", "Old title");
     interactionManager.start({
@@ -42,7 +30,6 @@ describe("interaction/cleanup", () => {
 
     clearAllInteractionState("test_cleanup");
 
-    expect(questionManager.isActive()).toBe(false);
     expect(permissionManager.isActive()).toBe(false);
     expect(renameManager.isWaitingForName()).toBe(false);
     expect(interactionManager.getSnapshot()).toBeNull();
@@ -58,11 +45,11 @@ describe("interaction/cleanup", () => {
     clearAllInteractionState("first_cleanup");
 
     interactionManager.start({
-      kind: "question",
+      kind: "form",
       expectedInput: "callback",
-      metadata: { questionIndex: 0 },
+      metadata: { formID: "f-1" },
     });
 
-    expect(interactionManager.getSnapshot()?.kind).toBe("question");
+    expect(interactionManager.getSnapshot()?.kind).toBe("form");
   });
 });

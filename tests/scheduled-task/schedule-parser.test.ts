@@ -9,14 +9,10 @@ const mocked = vi.hoisted(() => ({
   loggerWarnMock: vi.fn(),
 }));
 
-vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    session: {
-      create: mocked.sessionCreateMock,
-      prompt: mocked.sessionPromptMock,
-      delete: mocked.sessionDeleteMock,
-    },
-  },
+vi.mock("../../src/opencode/client-v2.js", () => ({
+  createSession: mocked.sessionCreateMock,
+  generateSessionText: mocked.sessionPromptMock,
+  deleteSession: mocked.sessionDeleteMock,
 }));
 
 vi.mock("../../src/utils/logger.js", () => ({
@@ -46,18 +42,13 @@ describe("scheduled-task/schedule-parser", () => {
   it("parses recurring schedule JSON and removes temporary session", async () => {
     mocked.sessionPromptMock.mockResolvedValue({
       data: {
-        parts: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              kind: "cron",
-              cron: "*/5 * * * *",
-              timezone: "UTC",
-              summary: "Every 5 minutes",
-              nextRunAt: "2026-03-15T10:05:00.000Z",
-            }),
-          },
-        ],
+        text: JSON.stringify({
+          kind: "cron",
+          cron: "*/5 * * * *",
+          timezone: "UTC",
+          summary: "Every 5 minutes",
+          nextRunAt: "2026-03-15T10:05:00.000Z",
+        }),
       },
       error: null,
     });
@@ -75,28 +66,23 @@ describe("scheduled-task/schedule-parser", () => {
       directory: "D:/Projects/Repo",
       title: "Scheduled task schedule parser",
     });
-    expect(mocked.sessionDeleteMock).toHaveBeenCalledWith({ sessionID: "temp-session" });
+    expect(mocked.sessionDeleteMock).toHaveBeenCalledWith("temp-session");
   });
 
   it("parses one-time schedule from fenced JSON", async () => {
     mocked.sessionPromptMock.mockResolvedValue({
       data: {
-        parts: [
-          {
-            type: "text",
-            text: [
-              "```json",
-              JSON.stringify({
-                kind: "once",
-                runAt: "2026-03-16T12:00:00.000Z",
-                timezone: "UTC",
-                summary: "Tomorrow at 12:00",
-                nextRunAt: "2026-03-16T12:00:00.000Z",
-              }),
-              "```",
-            ].join("\n"),
-          },
-        ],
+        text: [
+          "```json",
+          JSON.stringify({
+            kind: "once",
+            runAt: "2026-03-16T12:00:00.000Z",
+            timezone: "UTC",
+            summary: "Tomorrow at 12:00",
+            nextRunAt: "2026-03-16T12:00:00.000Z",
+          }),
+          "```",
+        ].join("\n"),
       },
       error: null,
     });
@@ -110,13 +96,13 @@ describe("scheduled-task/schedule-parser", () => {
       summary: "Tomorrow at 12:00",
       nextRunAt: "2026-03-16T12:00:00.000Z",
     });
-    expect(mocked.sessionDeleteMock).toHaveBeenCalledWith({ sessionID: "temp-session" });
+    expect(mocked.sessionDeleteMock).toHaveBeenCalledWith("temp-session");
   });
 
   it("cleans up temporary session when parser returns invalid JSON", async () => {
     mocked.sessionPromptMock.mockResolvedValue({
       data: {
-        parts: [{ type: "text", text: "not json" }],
+        text: "not json",
       },
       error: null,
     });
@@ -124,6 +110,6 @@ describe("scheduled-task/schedule-parser", () => {
     await expect(parseTaskSchedule("every friday", "D:/Projects/Repo")).rejects.toThrow(
       "invalid JSON",
     );
-    expect(mocked.sessionDeleteMock).toHaveBeenCalledWith({ sessionID: "temp-session" });
+    expect(mocked.sessionDeleteMock).toHaveBeenCalledWith("temp-session");
   });
 });

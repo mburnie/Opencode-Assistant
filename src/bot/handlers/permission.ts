@@ -1,7 +1,6 @@
 import { Context, InlineKeyboard } from "grammy";
 import { permissionManager } from "../../permission/manager.js";
-import { opencodeClient } from "../../opencode/client.js";
-import { getCurrentProject } from "../../settings/manager.js";
+import { replyToPermission } from "../../opencode/client-v2.js";
 import { getCurrentSession } from "../../session/manager.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { interactionManager } from "../../interaction/manager.js";
@@ -125,7 +124,18 @@ export async function handlePermissionCallback(ctx: Context): Promise<boolean> {
   }
 
   const parts = data.split(":");
-  const action = parts[1];
+  let action = parts[1];
+
+  // Security: continuing/always approval is disabled. A stale "always"
+  // callback (from an old message) is downgraded to a rejection so the
+  // pending request is resolved with deny-by-default and never persists.
+  if (action === "always") {
+    logger.warn(
+      "[PermissionHandler] Rejecting legacy 'always' permission callback: " +
+        "continuing approvals are disabled",
+    );
+    action = "reject";
+  }
 
   if (!isPermissionReply(action)) {
     await ctx.answerCallbackQuery({
@@ -157,12 +167,10 @@ async function handlePermissionReply(
   requestID: string,
   callbackMessageId: number | null,
 ): Promise<void> {
-  const currentProject = getCurrentProject();
   const currentSession = getCurrentSession();
   const chatId = ctx.chat?.id;
-  const directory = currentSession?.directory ?? currentProject?.worktree;
 
-  if (!directory || !chatId) {
+  if (!currentSession || !chatId) {
     permissionManager.clear();
     clearPermissionInteraction("permission_invalid_runtime_context");
 
@@ -194,11 +202,7 @@ async function handlePermissionReply(
   safeBackgroundTask({
     taskName: "permission.reply",
     task: () =>
-      opencodeClient.permission.reply({
-        requestID,
-        directory,
-        reply,
-      }),
+      replyToPermission(currentSession.id, requestID, reply),
     onSuccess: ({ error }) => {
       if (error) {
         logger.error("[PermissionHandler] Failed to send permission reply:", error);
@@ -278,13 +282,17 @@ function formatPermissionText(request: PermissionRequest): string {
 }
 
 /**
- * Build inline keyboard with permission buttons
+ * Build inline keyboard with permission buttons.
+ *
+ * Security: only "Allow once" and "Reject" are offered. A one-shot approval
+ * never extends into broad or continuing permission, so there is deliberately
+ * no "Allow always" button. Stale callbacks that carry an "always" decision
+ * (e.g. from an older message) are denied below.
  */
 function buildPermissionKeyboard(): InlineKeyboard {
   const keyboard = new InlineKeyboard();
 
   keyboard.text(t("permission.button.allow"), "permission:once").row();
-  keyboard.text(t("permission.button.always"), "permission:always").row();
   keyboard.text(t("permission.button.reject"), "permission:reject");
 
   return keyboard;

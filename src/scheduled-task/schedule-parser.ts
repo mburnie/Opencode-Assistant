@@ -1,4 +1,8 @@
-import { opencodeClient } from "../opencode/client.js";
+import {
+  createSession,
+  deleteSession,
+  generateSessionText,
+} from "../opencode/client-v2.js";
 import { logger } from "../utils/logger.js";
 import type { ParsedTaskSchedule } from "./types.js";
 
@@ -121,16 +125,6 @@ function parseSchedulePayload(rawText: string): ParsedTaskSchedule {
   return validateParsedSchedule(payload);
 }
 
-function collectResponseText(
-  parts: Array<{ type?: string; text?: string; ignored?: boolean }>,
-): string {
-  return parts
-    .filter((part) => part.type === "text" && typeof part.text === "string" && !part.ignored)
-    .map((part) => part.text)
-    .join("")
-    .trim();
-}
-
 function buildSchedulePrompt(scheduleText: string, timezone: string): string {
   const now = new Date().toISOString();
 
@@ -168,7 +162,7 @@ export async function parseTaskSchedule(
   let sessionId: string | null = null;
 
   try {
-    const { data: session, error: createError } = await opencodeClient.session.create({
+    const { data: session, error: createError } = await createSession({
       directory: trimmedDirectory,
       title: SCHEDULE_PARSE_SESSION_TITLE,
     });
@@ -179,19 +173,16 @@ export async function parseTaskSchedule(
 
     sessionId = session.id;
 
-    const { data: response, error: promptError } = await opencodeClient.session.prompt({
-      sessionID: session.id,
-      directory: session.directory,
-      system:
-        "You are a schedule parser. Your only job is to convert user schedule text into strict JSON output.",
-      parts: [{ type: "text", text: buildSchedulePrompt(trimmedScheduleText, timezone) }],
-    });
+    const { data: response, error: promptError } = await generateSessionText(
+      session.id,
+      buildSchedulePrompt(trimmedScheduleText, timezone),
+    );
 
     if (promptError || !response) {
       throw promptError || new Error("Failed to parse schedule");
     }
 
-    const responseText = collectResponseText(response.parts);
+    const responseText = response.text;
     if (!responseText) {
       throw new Error("Schedule parser returned an empty response");
     }
@@ -200,7 +191,7 @@ export async function parseTaskSchedule(
   } finally {
     if (sessionId) {
       try {
-        await opencodeClient.session.delete({ sessionID: sessionId });
+        await deleteSession(sessionId);
       } catch (error) {
         logger.warn(
           `[ScheduledTaskScheduleParser] Failed to delete temporary session: sessionId=${sessionId}`,

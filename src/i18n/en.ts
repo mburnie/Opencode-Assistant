@@ -59,6 +59,11 @@ export const en = {
   "question.blocked.command_not_allowed":
     "⚠️ This command is not available until current question flow is completed.",
 
+  "form.blocked.expected_answer":
+    "⚠️ Answer the current form field using buttons, Custom answer, or Cancel.",
+  "form.blocked.command_not_allowed":
+    "⚠️ This command is not available until current form is completed.",
+
   "inline.button.cancel": "❌ Cancel",
   "inline.inactive_callback": "This menu is inactive",
   "inline.cancelled_callback": "Cancelled",
@@ -397,6 +402,41 @@ export const en = {
   "question.summary.title": "✅ Poll completed!\n\n",
   "question.summary.question": "Question {index}:\n{question}\n\n",
   "question.summary.answer": "Answer:\n{answer}\n\n",
+
+  "form.inactive_callback": "Form is inactive",
+  "form.processing_error_callback": "Processing error",
+  "form.select_one_required_callback": "Select at least one option",
+  "form.enter_custom_callback": "Send your answer as a message",
+  "form.cancelled": "❌ Form cancelled",
+  "form.answer_already_received": "Answer already received, please wait...",
+  "form.completed_no_answers": "✅ Form completed (no answers)",
+  "form.no_active_request": "❌ No active form request",
+  "form.send_answers_error": "❌ Failed to send form answers to agent",
+  "form.multi_hint": "You can select multiple options",
+  "form.text_hint": "Send your answer as a message or tap Custom answer.",
+  "form.number_hint": "Send a number.",
+  "form.required_hint": "\n\nRequired",
+  "form.placeholder": "Placeholder",
+  "form.external_link": "Open this link to continue",
+  "form.min": "min",
+  "form.max": "max",
+  "form.invalid_number": "⚠️ Please send a valid number.",
+  "form.invalid_integer": "⚠️ Please send a whole number.",
+  "form.number_too_small": "⚠️ Number must be at least {min}.",
+  "form.number_too_large": "⚠️ Number must be at most {max}.",
+  "form.boolean_true": "Yes",
+  "form.boolean_false": "No",
+  "form.button.submit": "✅ Done",
+  "form.button.custom": "🔤 Custom answer",
+  "form.button.cancel": "❌ Cancel",
+  "form.button.yes": "✅ Yes",
+  "form.button.no": "❌ No",
+  "form.button.open_link": "🔗 Open",
+  "form.use_custom_button_first":
+    '⚠️ To send text, tap "Custom answer" for the current field first.',
+  "form.summary.title": "✅ Form completed!\n\n",
+  "form.summary.field": "Field {index}:\n{field}\n\n",
+  "form.summary.answer": "Answer:\n{answer}\n\n",
 
   "settings.select": "⚙️ Quick Settings — choose an option:",
   "settings.button.agent": "🤖 Agent",

@@ -1,6 +1,6 @@
 import { CommandContext, Context } from "grammy";
 import { config } from "../../config.js";
-import { opencodeClient } from "../../opencode/client.js";
+import { checkServerHealth } from "../../opencode/client-v2.js";
 import { resolveLocalOpencodeTarget, startLocalOpencodeServer } from "../../opencode/process.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -17,9 +17,9 @@ async function waitForServerReady(maxWaitMs: number = 10000): Promise<boolean> {
 
   while (Date.now() - startTime < maxWaitMs) {
     try {
-      const { data, error } = await opencodeClient.global.health();
+      const { healthy } = await checkServerHealth();
 
-      if (!error && data?.healthy) {
+      if (healthy) {
         return true;
       }
     } catch {
@@ -46,11 +46,11 @@ export async function opencodeStartCommand(ctx: CommandContext<Context>) {
 
     // Check if server is already accessible.
     try {
-      const { data, error } = await opencodeClient.global.health();
+      const { healthy, version } = await checkServerHealth();
 
-      if (!error && data?.healthy) {
+      if (healthy) {
         await ctx.reply(
-          t("opencode_start.already_running", { version: data.version || t("common.unknown") }),
+          t("opencode_start.already_running", { version: version || t("common.unknown") }),
         );
         return;
       }
@@ -94,14 +94,14 @@ export async function opencodeStartCommand(ctx: CommandContext<Context>) {
       return;
     }
 
-    const { data: health } = await opencodeClient.global.health();
+    const { version: serverVersion } = await checkServerHealth();
     await editBotText({
       api: ctx.api,
       chatId: ctx.chat.id,
       messageId: statusMessage.message_id,
       text: t("opencode_start.success", {
         pid,
-        version: health?.version || t("common.unknown"),
+        version: serverVersion || t("common.unknown"),
       }),
     });
 

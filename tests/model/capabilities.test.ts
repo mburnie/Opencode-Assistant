@@ -1,46 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { supportsInput, supportsAttachment } from "../../src/model/capabilities.js";
-import type { Model } from "@opencode-ai/sdk/v2";
+import {
+  supportsInput,
+  supportsAttachment,
+  type ModelCapabilities,
+} from "../../src/model/capabilities.js";
 
 describe("model/capabilities", () => {
   describe("supportsInput", () => {
     it("returns true when model supports image input", () => {
-      const capabilities: Model["capabilities"] = {
-        temperature: true,
-        reasoning: false,
-        attachment: true,
-        toolcall: true,
-        input: { text: true, audio: false, image: true, video: false, pdf: false },
-        output: { text: true, audio: false, image: false, video: false, pdf: false },
-        interleaved: false,
+      const capabilities: ModelCapabilities = {
+        tools: true,
+        input: ["text", "image"],
+        output: ["text"],
       };
 
       expect(supportsInput(capabilities, "image")).toBe(true);
     });
 
     it("returns false when model does not support image input", () => {
-      const capabilities: Model["capabilities"] = {
-        temperature: true,
-        reasoning: false,
-        attachment: false,
-        toolcall: true,
-        input: { text: true, audio: false, image: false, video: false, pdf: false },
-        output: { text: true, audio: false, image: false, video: false, pdf: false },
-        interleaved: false,
+      const capabilities: ModelCapabilities = {
+        tools: true,
+        input: ["text"],
+        output: ["text"],
       };
 
       expect(supportsInput(capabilities, "image")).toBe(false);
     });
 
     it("returns true when model supports PDF input", () => {
-      const capabilities: Model["capabilities"] = {
-        temperature: true,
-        reasoning: false,
-        attachment: true,
-        toolcall: true,
-        input: { text: true, audio: false, image: true, video: false, pdf: true },
-        output: { text: true, audio: false, image: false, video: false, pdf: false },
-        interleaved: false,
+      const capabilities: ModelCapabilities = {
+        tools: true,
+        input: ["text", "image", "pdf"],
+        output: ["text"],
       };
 
       expect(supportsInput(capabilities, "pdf")).toBe(true);
@@ -54,14 +45,10 @@ describe("model/capabilities", () => {
     });
 
     it("checks all input types", () => {
-      const capabilities: Model["capabilities"] = {
-        temperature: true,
-        reasoning: false,
-        attachment: true,
-        toolcall: true,
-        input: { text: true, audio: true, image: true, video: true, pdf: true },
-        output: { text: true, audio: false, image: false, video: false, pdf: false },
-        interleaved: false,
+      const capabilities: ModelCapabilities = {
+        tools: true,
+        input: ["text", "audio", "image", "video", "pdf"],
+        output: ["text"],
       };
 
       expect(supportsInput(capabilities, "image")).toBe(true);
@@ -73,28 +60,20 @@ describe("model/capabilities", () => {
 
   describe("supportsAttachment", () => {
     it("returns true when model supports attachments", () => {
-      const capabilities: Model["capabilities"] = {
-        temperature: true,
-        reasoning: false,
-        attachment: true,
-        toolcall: true,
-        input: { text: true, audio: false, image: true, video: false, pdf: false },
-        output: { text: true, audio: false, image: false, video: false, pdf: false },
-        interleaved: false,
+      const capabilities: ModelCapabilities = {
+        tools: true,
+        input: ["text", "image", "pdf"],
+        output: ["text"],
       };
 
       expect(supportsAttachment(capabilities)).toBe(true);
     });
 
     it("returns false when model does not support attachments", () => {
-      const capabilities: Model["capabilities"] = {
-        temperature: true,
-        reasoning: false,
-        attachment: false,
-        toolcall: true,
-        input: { text: true, audio: false, image: false, video: false, pdf: false },
-        output: { text: true, audio: false, image: false, video: false, pdf: false },
-        interleaved: false,
+      const capabilities: ModelCapabilities = {
+        tools: true,
+        input: ["text"],
+        output: ["text"],
       };
 
       expect(supportsAttachment(capabilities)).toBe(false);

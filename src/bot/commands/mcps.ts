@@ -1,11 +1,22 @@
 import { CommandContext, Context, InlineKeyboard } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import {
+  connectMcpServer,
+  disconnectMcpServer,
+  listMcpServers,
+} from "../../opencode/client-v2.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { interactionManager } from "../../interaction/manager.js";
 import type { InteractionState } from "../../interaction/types.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
-import type { McpStatus } from "@opencode-ai/sdk/v2";
+
+type McpStatus =
+  | { status: "connected" }
+  | { status: "pending" }
+  | { status: "disabled" }
+  | { status: "failed"; error: string }
+  | { status: "needs_auth"; error: string }
+  | { status: "needs_client_registration"; error?: string };
 
 const MCPS_CALLBACK_PREFIX = "mcps:";
 const MCPS_CALLBACK_SELECT_PREFIX = `${MCPS_CALLBACK_PREFIX}select:`;
@@ -276,20 +287,16 @@ function parseSelectIndex(data: string): number | null {
 }
 
 async function getMcpServerList(projectDirectory: string): Promise<McpServerItem[]> {
-  const { data, error } = await opencodeClient.mcp.status({
-    directory: normalizeDirectoryForApi(projectDirectory),
-  });
+  const { data, error } = await listMcpServers(normalizeDirectoryForApi(projectDirectory));
 
   if (error || !data) {
     throw error || new Error("No MCP status data received");
   }
 
-  const servers = parseMcpsServers(data);
-  if (!servers) {
-    throw new Error("Invalid MCP status data format");
-  }
-
-  return servers;
+  return data.map((server) => ({
+    name: server.name,
+    status: server.status as McpStatus,
+  }));
 }
 
 async function toggleMcpServer(
@@ -297,18 +304,15 @@ async function toggleMcpServer(
   serverName: string,
   enable: boolean,
 ): Promise<void> {
-  const params = {
-    name: serverName,
-    directory: normalizeDirectoryForApi(projectDirectory),
-  };
+  const directory = normalizeDirectoryForApi(projectDirectory);
 
   if (enable) {
-    const { error } = await opencodeClient.mcp.connect(params);
+    const { error } = await connectMcpServer(serverName, directory);
     if (error) {
       throw error;
     }
   } else {
-    const { error } = await opencodeClient.mcp.disconnect(params);
+    const { error } = await disconnectMcpServer(serverName, directory);
     if (error) {
       throw error;
     }

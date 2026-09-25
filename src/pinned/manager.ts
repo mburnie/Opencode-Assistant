@@ -1,6 +1,7 @@
 import type { Api } from "grammy";
 import { logger } from "../utils/logger.js";
-import { opencodeClient } from "../opencode/client.js";
+import { callOpenCode, getSession, opencodeClientV2 } from "../opencode/client-v2.js";
+import { listMessages } from "../opencode/client-v2-messages.js";
 import { getGitWorktreeContext } from "../git/worktree.js";
 import { getCurrentSession } from "../session/manager.js";
 import {
@@ -143,13 +144,12 @@ class PinnedMessageManager {
   /**
    * Load context token usage from session history
    */
-  async loadContextFromHistory(sessionId: string, directory: string): Promise<void> {
+  async loadContextFromHistory(sessionId: string, _directory: string): Promise<void> {
     try {
       logger.debug(`[PinnedManager] Loading context from history for session: ${sessionId}`);
 
-      const { data: messagesData, error } = await opencodeClient.session.messages({
+      const { data: messagesData, error } = await listMessages({
         sessionID: sessionId,
-        directory,
       });
 
       if (error || !messagesData) {
@@ -378,10 +378,9 @@ class PinnedMessageManager {
       logger.debug(`[PinnedManager] loadDiffsFromApi: trying session.diff() for ${sessionId}`);
 
       // Try session.diff() API first
-      const { data, error } = await opencodeClient.session.diff({
-        sessionID: sessionId,
-        directory: project.worktree,
-      });
+      const { data, error } = await callOpenCode(() =>
+        opencodeClientV2.session.diff({ sessionID: sessionId }),
+      );
 
       logger.debug(
         `[PinnedManager] session.diff() result: error=${!!error}, data.length=${data?.length ?? 0}`,
@@ -413,13 +412,12 @@ class PinnedMessageManager {
   /**
    * Fallback: extract file changes from session message tool parts
    */
-  private async loadDiffsFromMessages(sessionId: string, directory: string): Promise<void> {
+  private async loadDiffsFromMessages(sessionId: string, _directory: string): Promise<void> {
     try {
       logger.debug(`[PinnedManager] loadDiffsFromMessages: fetching messages for ${sessionId}`);
 
-      const { data: messagesData, error } = await opencodeClient.session.messages({
+      const { data: messagesData, error } = await listMessages({
         sessionID: sessionId,
-        directory,
       });
 
       if (error || !messagesData) {
@@ -534,13 +532,10 @@ class PinnedMessageManager {
     }
 
     try {
-      const { data: sessionData } = await opencodeClient.session.get({
-        sessionID: session.id,
-        directory: project.worktree,
-      });
+      const { data: sessionData } = await getSession(session.id);
 
       if (sessionData && sessionData.title !== this.state.sessionTitle) {
-        this.state.sessionTitle = sessionData.title;
+        this.state.sessionTitle = sessionData.title ?? this.state.sessionTitle;
         logger.debug(`[PinnedManager] Session title refreshed: ${sessionData.title}`);
       }
     } catch (err) {

@@ -1,4 +1,4 @@
-import { opencodeClient } from "../../opencode/client.js";
+import { listSessions, getSession } from "../../opencode/client-v2.js";
 import { setCurrentSession, type SessionInfo } from "../../session/manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
@@ -25,7 +25,7 @@ export const sessionsCommand: WhatsAppCommandHandler = async (ctx) => {
   let sessions: SessionListItem[];
   try {
     const limit = config.bot.sessionsListLimit;
-    const { data, error } = await opencodeClient.session.list({
+    const { data, error } = await listSessions({
       directory: project.worktree,
       limit,
       roots: true,
@@ -63,24 +63,21 @@ export const sessionsCommand: WhatsAppCommandHandler = async (ctx) => {
       const picked = sessions[index - 1];
       if (!picked) return;
       try {
-        const { data: session, error } = await opencodeClient.session.get({
-          sessionID: picked.id,
-          directory: project.worktree,
-        });
+        const { data: session, error } = await getSession(picked.id);
         if (error || !session) throw error || new Error("Failed to load session");
 
         const info: SessionInfo = {
           id: session.id,
-          title: session.title,
+          title: session.title ?? "Untitled",
           directory: project.worktree,
         };
         setCurrentSession("whatsapp", info);
         clearAllInteractionState("whatsapp_session_switched");
 
         logger.info(
-          `[WhatsApp][sessions] Switched to id=${session.id} title="${session.title}"`,
+          `[WhatsApp][sessions] Switched to id=${session.id} title="${session.title ?? "Untitled"}"`,
         );
-        await ctx.reply(`✅ Switched to: *${session.title}*`);
+        await ctx.reply(`✅ Switched to: *${session.title ?? "Untitled"}*`);
       } catch (err) {
         logger.error("[WhatsApp][sessions] switch failed", err);
         await ctx.reply("Could not switch to that session.");

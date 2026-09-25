@@ -1,5 +1,5 @@
 import { CommandContext, Context, InlineKeyboard } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { updateSession } from "../../opencode/client-v2.js";
 import { getCurrentSession, setCurrentSession } from "../../session/manager.js";
 import { renameManager } from "../../rename/manager.js";
 import { interactionManager } from "../../interaction/manager.js";
@@ -130,14 +130,10 @@ export async function handleRenameTextAnswer(ctx: Context): Promise<boolean> {
   logger.info(`[RenameHandler] Renaming session ${sessionInfo.sessionId} to: ${newTitle}`);
 
   try {
-    const { data: updatedSession, error } = await opencodeClient.session.update({
-      sessionID: sessionInfo.sessionId,
-      directory: sessionInfo.directory,
-      title: newTitle,
-    });
+    const { error } = await updateSession(sessionInfo.sessionId, newTitle);
 
-    if (error || !updatedSession) {
-      throw error || new Error("Failed to update session");
+    if (error) {
+      throw error;
     }
 
     setCurrentSession("telegram", {

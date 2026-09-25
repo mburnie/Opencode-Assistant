@@ -11,12 +11,8 @@ const mocked = vi.hoisted(() => ({
   ensureEventSubscriptionMock: vi.fn(),
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    session: {
-      create: mocked.sessionCreateMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  createSession: mocked.sessionCreateMock,
 }));
 
 vi.mock("../../../src/settings/manager.js", () => ({
@@ -89,7 +85,7 @@ describe("bot/commands/new", () => {
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
       alreadyAttached: false,
-      restoredQuestion: false,
+      restoredForm: false,
       restoredPermissions: 0,
     });
     mocked.ensureEventSubscriptionMock.mockReset();

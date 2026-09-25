@@ -1,6 +1,11 @@
 import { getCurrentModel, setCurrentModel } from "../settings/manager.js";
 import { config } from "../config.js";
-import { opencodeClient } from "../opencode/client.js";
+import {
+  listProvidersWithModels,
+  getProviderAuthMethods as getProviderAuthMethodsV2,
+  setProviderApiKey as setProviderApiKeyV2,
+  getProviderOAuthUrl as getProviderOAuthUrlV2,
+} from "../opencode/client-v2.js";
 import { logger } from "../utils/logger.js";
 import type { ModelInfo, FavoriteModel, ModelSelectionLists } from "./types.js";
 import path from "node:path";
@@ -15,6 +20,121 @@ const MODEL_CATALOG_CACHE_TTL_MS = 10 * 60 * 1000;
 let cachedValidModelKeys: Set<string> | null = null;
 let modelCatalogCacheExpiresAt = 0;
 let modelCatalogFetchInFlight: Promise<Set<string> | null> | null = null;
+
+// Free-model detection: a model is treated as free when the server reports
+// zero cost for every published tier (input/output/cache all 0). Models with
+// no cost metadata are treated as NOT free so the stricter approval-scope
+// rule is only applied when we actually know the model is free.
+const FREE_MODEL_CACHE_TTL_MS = 10 * 60 * 1000;
+
+let cachedFreeModelKeys: Set<string> | null = null;
+let freeModelCacheExpiresAt = 0;
+let freeModelFetchInFlight: Promise<Set<string> | null> | null = null;
+
+function isZeroCostModel(model: {
+  cost?: Array<{ input: number; output: number; cache?: { read: number; write: number } }>;
+}): boolean {
+  const cost = model.cost;
+  if (!Array.isArray(cost) || cost.length === 0) {
+    return false;
+  }
+
+  return cost.every(
+    (tier) =>
+      tier.input === 0 &&
+      tier.output === 0 &&
+      (tier.cache?.read ?? 0) === 0 &&
+      (tier.cache?.write ?? 0) === 0,
+  );
+}
+
+/**
+ * Returns the set of "free" model keys (providerID/modelID) currently known
+ * to the server, or null when the catalog is unavailable.
+ */
+async function getFreeModelKeys(): Promise<Set<string> | null> {
+  if (cachedFreeModelKeys && Date.now() < freeModelCacheExpiresAt) {
+    return cachedFreeModelKeys;
+  }
+
+  if (freeModelFetchInFlight) {
+    return freeModelFetchInFlight;
+  }
+
+  freeModelFetchInFlight = (async () => {
+    try {
+      logger.debug("[ModelManager] Refreshing free-model catalog from OpenCode API");
+      const { data: providersData, error } = await listProvidersWithModels();
+
+      if (error || !providersData) {
+        logger.warn("[ModelManager] Failed to refresh free-model catalog:", error);
+
+        if (cachedFreeModelKeys) {
+          logger.warn("[ModelManager] Using stale free-model catalog cache after refresh failure");
+          return cachedFreeModelKeys;
+        }
+
+        return null;
+      }
+
+      const freeKeys = new Set<string>();
+
+      for (const provider of providersData) {
+        for (const [modelID, model] of Object.entries(provider.models)) {
+          if (isZeroCostModel(model)) {
+            freeKeys.add(getModelKey(provider.id, modelID));
+          }
+        }
+      }
+
+      cachedFreeModelKeys = freeKeys;
+      freeModelCacheExpiresAt = Date.now() + FREE_MODEL_CACHE_TTL_MS;
+
+      logger.debug(
+        `[ModelManager] Free-model catalog refreshed: freeModels=${freeKeys.size}`,
+      );
+
+      return cachedFreeModelKeys;
+    } catch (err) {
+      logger.warn("[ModelManager] Error refreshing free-model catalog:", err);
+
+      if (cachedFreeModelKeys) {
+        logger.warn("[ModelManager] Using stale free-model catalog cache after refresh exception");
+        return cachedFreeModelKeys;
+      }
+
+      return null;
+    } finally {
+      freeModelFetchInFlight = null;
+    }
+  })();
+
+  return freeModelFetchInFlight;
+}
+
+/**
+ * Whether the given model is reported as free (zero cost) by the server.
+ * Returns false when the model is unknown or the catalog is unavailable.
+ */
+export async function isFreeModel(providerID: string, modelID: string): Promise<boolean> {
+  if (!providerID || !modelID) {
+    return false;
+  }
+
+  const freeKeys = await getFreeModelKeys();
+  if (!freeKeys) {
+    return false;
+  }
+
+  return freeKeys.has(getModelKey(providerID, modelID));
+}
+
+/** Test helper: drop the free-model cache. */
+export function __resetFreeModelCacheForTests(): void {
+  cachedFreeModelKeys = null;
+  freeModelCacheExpiresAt = 0;
+  freeModelFetchInFlight = null;
+}
 
 function getModelKey(providerID: string, modelID: string): string {
   return `${providerID}/${modelID}`;
@@ -71,10 +191,10 @@ async function getValidModelKeys(): Promise<Set<string> | null> {
   modelCatalogFetchInFlight = (async () => {
     try {
       logger.debug("[ModelManager] Refreshing model catalog from OpenCode API");
-      const response = await opencodeClient.config.providers();
+      const { data: providersData, error } = await listProvidersWithModels();
 
-      if (response.error || !response.data) {
-        logger.warn("[ModelManager] Failed to refresh model catalog:", response.error);
+      if (error || !providersData) {
+        logger.warn("[ModelManager] Failed to refresh model catalog:", error);
 
         if (cachedValidModelKeys) {
           logger.warn("[ModelManager] Using stale model catalog cache after refresh failure");
@@ -86,7 +206,7 @@ async function getValidModelKeys(): Promise<Set<string> | null> {
 
       const validModelKeys = new Set<string>();
 
-      for (const provider of response.data.providers) {
+      for (const provider of providersData) {
         for (const modelID of Object.keys(provider.models)) {
           validModelKeys.add(getModelKey(provider.id, modelID));
         }
@@ -96,7 +216,7 @@ async function getValidModelKeys(): Promise<Set<string> | null> {
       modelCatalogCacheExpiresAt = Date.now() + MODEL_CATALOG_CACHE_TTL_MS;
 
       logger.debug(
-        `[ModelManager] Model catalog refreshed: providers=${response.data.providers.length}, models=${validModelKeys.size}`,
+        `[ModelManager] Model catalog refreshed: providers=${providersData.length}, models=${validModelKeys.size}`,
       );
 
       return cachedValidModelKeys;
@@ -322,32 +442,24 @@ export interface CategorizedCatalog {
  */
 export async function getCategorizedCatalog(): Promise<CategorizedCatalog> {
   try {
-    const [providersResp, authResp] = await Promise.all([
-      opencodeClient.config.providers(),
-      opencodeClient.provider.auth(),
-    ]);
+    const { data: providersData, error: providersError } = await listProvidersWithModels();
 
-    if (providersResp.error || !providersResp.data) {
-      logger.warn("[ModelManager] Failed to fetch provider catalog:", providersResp.error);
+    if (providersError || !providersData) {
+      logger.warn("[ModelManager] Failed to fetch provider catalog:", providersError);
       return { free: [], paid: [] };
     }
-
-    const authMap: Record<string, Array<{ type: "oauth" | "api"; label: string }>> =
-      authResp.data ?? {};
 
     const free: ProviderEntry[] = [];
     const paid: ProviderEntry[] = [];
 
-    for (const provider of providersResp.data.providers) {
+    for (const provider of providersData) {
       const models: ProviderModelInfo[] = Object.entries(provider.models)
         .map(([id, model]) => ({ id, name: model.name ?? id }))
         .sort((a, b) => a.id.localeCompare(b.id));
 
       if (models.length === 0) continue;
 
-      const hasKey = Boolean(provider.key);
-      const apiAuthMethods = (authMap[provider.id] ?? []).filter((m) => m.type === "api");
-      const needsUserApiKey = apiAuthMethods.length > 0 && !hasKey;
+      const needsUserApiKey = provider.activation === "disabled";
 
       const entry: ProviderEntry = {
         id: provider.id,
@@ -374,8 +486,8 @@ export async function getCategorizedCatalog(): Promise<CategorizedCatalog> {
 }
 
 export interface ProviderAuthMethod {
-  type: "oauth" | "api";
-  label: string;
+  type: "oauth" | "api" | "command" | "env";
+  label?: string;
 }
 
 /**
@@ -387,20 +499,17 @@ export async function getProviderAuthMethods(
   providerID: string,
 ): Promise<ProviderAuthMethod[] | null> {
   try {
-    const response = await opencodeClient.provider.auth();
+    const { data: methods, error } = await getProviderAuthMethodsV2(providerID);
 
-    if (response.error || !response.data) {
+    if (error || !methods) {
       logger.warn(
         `[ModelManager] Failed to fetch auth methods for ${providerID}:`,
-        response.error,
+        error,
       );
       return null;
     }
 
-    const methods = response.data[providerID];
-    if (!Array.isArray(methods)) return null;
-
-    return methods.map((m) => ({ type: m.type, label: m.label }));
+    return methods;
   } catch (err) {
     logger.error(`[ModelManager] Error fetching auth methods for ${providerID}:`, err);
     return null;
@@ -408,18 +517,15 @@ export async function getProviderAuthMethods(
 }
 
 /**
- * Stores an API key for a provider via OpenCode's auth API.
+ * Stores an API key for a provider via OpenCode's integration API.
  * Invalidates the catalog cache so the provider moves to "free" on next list.
  */
 export async function setProviderApiKey(providerID: string, apiKey: string): Promise<boolean> {
   try {
-    const response = await opencodeClient.auth.set({
-      providerID,
-      auth: { type: "api", key: apiKey },
-    });
+    const { error } = await setProviderApiKeyV2(providerID, apiKey);
 
-    if (response.error) {
-      logger.warn(`[ModelManager] auth.set failed for ${providerID}:`, response.error);
+    if (error) {
+      logger.warn(`[ModelManager] auth.set failed for ${providerID}:`, error);
       return false;
     }
 
@@ -442,19 +548,16 @@ export async function getProviderOAuthUrl(
   methodIndex = 0,
 ): Promise<{ url: string; instructions: string } | null> {
   try {
-    const response = await opencodeClient.provider.oauth.authorize({
-      providerID,
-      method: methodIndex,
-    });
+    const { data, error } = await getProviderOAuthUrlV2(providerID, methodIndex);
 
-    if (response.error || !response.data) {
-      logger.warn(`[ModelManager] OAuth authorize failed for ${providerID}:`, response.error);
+    if (error || !data) {
+      logger.warn(`[ModelManager] OAuth authorize failed for ${providerID}:`, error);
       return null;
     }
 
     return {
-      url: response.data.url,
-      instructions: response.data.instructions ?? "",
+      url: data.url,
+      instructions: data.instructions ?? "",
     };
   } catch (err) {
     logger.error(`[ModelManager] Error starting OAuth for ${providerID}:`, err);

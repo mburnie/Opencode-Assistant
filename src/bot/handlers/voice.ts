@@ -2,7 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import { URL } from "node:url";
 import type { Context } from "grammy";
-import type { FilePartInput } from "@opencode-ai/sdk/v2";
+import type { LegacyFilePart } from "../../opencode/client-v2.js";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { SocksProxyAgent } from "socks-proxy-agent";
 import { config } from "../../config.js";
@@ -101,7 +101,7 @@ export interface VoiceMessageDeps extends ProcessPromptDeps {
     ctx: Context,
     text: string,
     deps: ProcessPromptDeps,
-    fileParts?: FilePartInput[],
+    fileParts?: LegacyFilePart[],
     options?: { responseMode?: "text_only" | "text_and_tts" },
   ) => Promise<boolean>;
 }

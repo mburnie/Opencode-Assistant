@@ -1,4 +1,5 @@
-import { opencodeClient } from "../opencode/client.js";
+import { listAgents, type AgentListItem } from "../opencode/client-v2.js";
+import { listMessages } from "../opencode/client-v2-messages.js";
 import { getCurrentProject } from "../settings/manager.js";
 import { getCurrentSession } from "../session/manager.js";
 import { getCurrentAgent, setCurrentAgent } from "../settings/manager.js";
@@ -12,9 +13,7 @@ import type { AgentInfo } from "./types.js";
 export async function getAvailableAgents(): Promise<AgentInfo[]> {
   try {
     const project = getCurrentProject();
-    const { data: agents, error } = await opencodeClient.app.agents(
-      project ? { directory: project.worktree } : undefined,
-    );
+    const { data: agents, error } = await listAgents(project?.worktree);
 
     if (error) {
       logger.error("[AgentManager] Failed to fetch agents:", error);
@@ -27,7 +26,7 @@ export async function getAvailableAgents(): Promise<AgentInfo[]> {
 
     // Filter out hidden agents and subagents (only show primary and all)
     const filtered = agents.filter(
-      (agent) => !agent.hidden && (agent.mode === "primary" || agent.mode === "all"),
+      (agent: AgentListItem) => !agent.hidden && (agent.mode === "primary" || agent.mode === "all"),
     );
 
     logger.debug(`[AgentManager] Fetched ${filtered.length} available agents`);
@@ -94,9 +93,8 @@ export async function fetchCurrentAgent(): Promise<string> {
   }
 
   try {
-    const { data: messages, error } = await opencodeClient.session.messages({
+    const { data: messages, error } = await listMessages({
       sessionID: session.id,
-      directory: project.worktree,
       limit: 1,
     });
 

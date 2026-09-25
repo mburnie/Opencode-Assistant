@@ -7,11 +7,15 @@ import {
   isTextMimeType,
   isFileSizeAllowed,
 } from "../utils/file-download.js";
-import { getModelCapabilities, supportsInput } from "../../model/capabilities.js";
+import {
+  getModelCapabilities,
+  supportsInput,
+  type ModelCapabilities,
+} from "../../model/capabilities.js";
 import { getStoredModel } from "../../model/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
-import type { FilePartInput, Model } from "@opencode-ai/sdk/v2";
+import type { LegacyFilePart } from "../../opencode/client-v2.js";
 
 export interface DocumentHandlerDeps extends ProcessPromptDeps {
   downloadFile?: (
@@ -21,13 +25,13 @@ export interface DocumentHandlerDeps extends ProcessPromptDeps {
   getModelCapabilities?: (
     providerId: string,
     modelId: string,
-  ) => Promise<Model["capabilities"] | null>;
+  ) => Promise<ModelCapabilities | null>;
   getStoredModel?: () => { providerID: string; modelID: string };
   processPrompt?: (
     ctx: Context,
     text: string,
     deps: ProcessPromptDeps,
-    fileParts?: FilePartInput[],
+    fileParts?: LegacyFilePart[],
   ) => Promise<boolean>;
 }
 
@@ -97,7 +101,7 @@ export async function handleDocumentMessage(
 
       const dataUri = toDataUri(downloadedFile.buffer, mimeType);
 
-      const filePart: FilePartInput = {
+      const filePart: LegacyFilePart = {
         type: "file",
         mime: mimeType,
         filename: filename,

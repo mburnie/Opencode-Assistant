@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocked = vi.hoisted(() => ({
-  opencodeClient: {
-    session: { list: vi.fn().mockResolvedValue({ data: [] }) },
-    config: { get: vi.fn().mockResolvedValue({ data: {} }) },
-  },
   getCurrentSession: vi.fn(),
   getCurrentProject: vi.fn(),
   getPinnedMessageId: vi.fn().mockReturnValue(null),
@@ -15,7 +11,16 @@ const mocked = vi.hoisted(() => ({
   getGitWorktreeContext: vi.fn(),
 }));
 
-vi.mock("../../src/opencode/client.js", () => ({ opencodeClient: mocked.opencodeClient }));
+vi.mock("../../src/opencode/client-v2.js", () => ({
+  callOpenCode: vi.fn().mockResolvedValue({ data: [] }),
+  getSession: vi.fn().mockResolvedValue({ data: null }),
+  opencodeClientV2: {
+    session: { diff: vi.fn().mockResolvedValue([]) },
+  },
+}));
+vi.mock("../../src/opencode/client-v2-messages.js", () => ({
+  listMessages: vi.fn().mockResolvedValue({ data: [] }),
+}));
 vi.mock("../../src/git/worktree.js", () => ({
   getGitWorktreeContext: mocked.getGitWorktreeContext,
 }));

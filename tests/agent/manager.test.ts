@@ -49,15 +49,12 @@ const mocked = vi.hoisted(() => {
   };
 });
 
-vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    app: {
-      agents: mocked.appAgentsMock,
-    },
-    session: {
-      messages: mocked.sessionMessagesMock,
-    },
-  },
+vi.mock("../../src/opencode/client-v2.js", () => ({
+  listAgents: mocked.appAgentsMock,
+}));
+
+vi.mock("../../src/opencode/client-v2-messages.js", () => ({
+  listMessages: mocked.sessionMessagesMock,
 }));
 
 vi.mock("../../src/settings/manager.js", () => ({

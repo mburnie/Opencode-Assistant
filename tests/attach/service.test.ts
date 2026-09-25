@@ -5,7 +5,6 @@ import {
   restoreAttachedCurrentSession,
 } from "../../src/attach/service.js";
 import { attachManager } from "../../src/attach/manager.js";
-import { questionManager } from "../../src/question/manager.js";
 import { permissionManager } from "../../src/permission/manager.js";
 
 const mocked = vi.hoisted(() => ({
@@ -18,9 +17,13 @@ const mocked = vi.hoisted(() => ({
     title: "Session One",
     directory: "D:\\Projects\\Repo",
   } as { id: string; title: string; directory: string } | null,
-  sessionStatusMock: vi.fn(),
-  questionListMock: vi.fn(),
-  permissionListMock: vi.fn(),
+
+  getActiveSessionsMock: vi.fn(),
+  listSessionFormsMock: vi.fn(),
+  getSessionFormMock: vi.fn(),
+  listPendingPermissionsMock: vi.fn(),
+  toLegacyPermissionRequestMock: vi.fn((req: any) => req),
+
   setSessionSummaryMock: vi.fn(),
   setBotAndChatIdMock: vi.fn(),
   pinnedIsInitializedMock: vi.fn(() => true),
@@ -32,7 +35,9 @@ const mocked = vi.hoisted(() => ({
   pinnedGetContextInfoMock: vi.fn(() => null),
   pinnedSetAttachStateMock: vi.fn(),
 
-  showCurrentQuestionMock: vi.fn(),
+  formManagerActiveMock: vi.fn(() => false),
+  handleFormCreatedMock: vi.fn(),
+  showCurrentFormFieldMock: vi.fn(),
   showPermissionRequestMock: vi.fn(),
   ensureEventSubscriptionMock: vi.fn(),
 }));
@@ -45,18 +50,12 @@ vi.mock("../../src/session/manager.js", () => ({
   getCurrentSession: vi.fn(() => mocked.currentSession),
 }));
 
-vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    session: {
-      status: mocked.sessionStatusMock,
-    },
-    question: {
-      list: mocked.questionListMock,
-    },
-    permission: {
-      list: mocked.permissionListMock,
-    },
-  },
+vi.mock("../../src/opencode/client-v2.js", () => ({
+  getActiveSessions: mocked.getActiveSessionsMock,
+  listSessionForms: mocked.listSessionFormsMock,
+  getSessionForm: mocked.getSessionFormMock,
+  listPendingPermissions: mocked.listPendingPermissionsMock,
+  toLegacyPermissionRequest: mocked.toLegacyPermissionRequestMock,
 }));
 
 vi.mock("../../src/summary/aggregator.js", () => ({
@@ -80,8 +79,15 @@ vi.mock("../../src/pinned/manager.js", () => ({
   },
 }));
 
-vi.mock("../../src/bot/handlers/question.js", () => ({
-  showCurrentQuestion: mocked.showCurrentQuestionMock,
+vi.mock("../../src/form/manager.js", () => ({
+  formManager: {
+    isActive: mocked.formManagerActiveMock,
+  },
+}));
+
+vi.mock("../../src/bot/handlers/form.js", () => ({
+  handleFormCreated: mocked.handleFormCreatedMock,
+  showCurrentFormField: mocked.showCurrentFormFieldMock,
 }));
 
 vi.mock("../../src/bot/handlers/permission.js", () => ({
@@ -99,7 +105,6 @@ function createBot(): Bot<Context> {
 describe("attach/service", () => {
   beforeEach(() => {
     attachManager.__resetForTests();
-    questionManager.clear();
     permissionManager.clear();
 
     mocked.currentProject = {
@@ -112,17 +117,18 @@ describe("attach/service", () => {
       directory: "D:\\Projects\\Repo",
     };
 
-    mocked.sessionStatusMock.mockReset();
-    mocked.sessionStatusMock.mockResolvedValue({
+    mocked.getActiveSessionsMock.mockReset();
+    mocked.getActiveSessionsMock.mockResolvedValue({
       data: {
-        "session-1": { type: "idle" },
+        "session-1": { type: "running" },
       },
       error: null,
     });
-    mocked.questionListMock.mockReset();
-    mocked.questionListMock.mockResolvedValue({ data: [], error: null });
-    mocked.permissionListMock.mockReset();
-    mocked.permissionListMock.mockResolvedValue({ data: [], error: null });
+    mocked.listSessionFormsMock.mockReset();
+    mocked.listSessionFormsMock.mockResolvedValue({ data: [], error: null });
+    mocked.getSessionFormMock.mockReset();
+    mocked.listPendingPermissionsMock.mockReset();
+    mocked.listPendingPermissionsMock.mockResolvedValue({ data: [], error: null });
     mocked.setSessionSummaryMock.mockReset();
     mocked.setBotAndChatIdMock.mockReset();
     mocked.pinnedIsInitializedMock.mockReset();
@@ -144,15 +150,21 @@ describe("attach/service", () => {
     mocked.pinnedSetAttachStateMock.mockReset();
     mocked.pinnedSetAttachStateMock.mockResolvedValue(undefined);
 
-    mocked.showCurrentQuestionMock.mockReset();
-    mocked.showCurrentQuestionMock.mockResolvedValue(undefined);
+    mocked.formManagerActiveMock.mockReset();
+    mocked.formManagerActiveMock.mockReturnValue(false);
+    mocked.handleFormCreatedMock.mockReset();
+    mocked.showCurrentFormFieldMock.mockReset();
     mocked.showPermissionRequestMock.mockReset();
-    mocked.showPermissionRequestMock.mockResolvedValue(undefined);
     mocked.ensureEventSubscriptionMock.mockReset();
     mocked.ensureEventSubscriptionMock.mockResolvedValue(undefined);
   });
 
   it("follows an idle session and updates attach state", async () => {
+    mocked.getActiveSessionsMock.mockResolvedValueOnce({
+      data: { "session-1": { type: "idle" } },
+      error: null,
+    });
+
     const result = await attachToSession({
       bot: createBot(),
       chatId: 777,
@@ -163,7 +175,7 @@ describe("attach/service", () => {
     expect(result).toEqual({
       busy: false,
       alreadyAttached: false,
-      restoredQuestion: false,
+      restoredForm: false,
       restoredPermissions: 0,
     });
     expect(mocked.ensureEventSubscriptionMock).toHaveBeenCalledWith("D:\\Projects\\Repo");
@@ -198,21 +210,19 @@ describe("attach/service", () => {
     expect(mocked.ensureEventSubscriptionMock).toHaveBeenCalledTimes(1);
   });
 
-  it("restores a pending question when first following a session", async () => {
-    mocked.questionListMock.mockResolvedValueOnce({
-      data: [
-        {
-          id: "question-1",
-          sessionID: "session-1",
-          questions: [
-            {
-              header: "Q1",
-              question: "Continue?",
-              options: [{ label: "Yes", description: "continue" }],
-            },
-          ],
-        },
-      ],
+  it("restores a pending form when first following a session", async () => {
+    mocked.listSessionFormsMock.mockResolvedValueOnce({
+      data: [{ id: "form-1", sessionID: "session-1", title: "Test", fields: [] }],
+      error: null,
+    });
+    mocked.getSessionFormMock.mockResolvedValueOnce({
+      data: {
+        id: "form-1",
+        sessionID: "session-1",
+        title: "Test",
+        fields: [],
+        state: { status: "pending" },
+      },
       error: null,
     });
 
@@ -223,8 +233,9 @@ describe("attach/service", () => {
       ensureEventSubscription: mocked.ensureEventSubscriptionMock,
     });
 
-    expect(result.restoredQuestion).toBe(true);
-    expect(mocked.showCurrentQuestionMock).toHaveBeenCalledOnce();
+    expect(result.restoredForm).toBe(true);
+    expect(mocked.handleFormCreatedMock).toHaveBeenCalledOnce();
+    expect(mocked.showCurrentFormFieldMock).toHaveBeenCalledOnce();
   });
 
   it("restores the saved current session on startup", async () => {

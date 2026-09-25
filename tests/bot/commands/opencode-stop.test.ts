@@ -21,12 +21,8 @@ vi.mock("../../../src/config.js", () => ({
   config: mocked.config,
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    global: {
-      health: mocked.healthMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  checkServerHealth: mocked.healthMock,
 }));
 
 vi.mock("../../../src/opencode/process.js", () => ({
@@ -94,7 +90,7 @@ describe("bot/commands/opencode-stop", () => {
 
   it("reports pid_not_found when server is healthy but no process is found", async () => {
     const ctx = createContext();
-    mocked.healthMock.mockResolvedValue({ data: { healthy: true, version: "1.2.3" }, error: null });
+    mocked.healthMock.mockResolvedValue({ healthy: true, version: "1.2.3" });
     mocked.findServerPidMock.mockResolvedValue(null);
 
     await opencodeStopCommand(ctx as never);
@@ -106,7 +102,7 @@ describe("bot/commands/opencode-stop", () => {
   it("stops the process found on the configured port", async () => {
     const ctx = createContext();
     mocked.healthMock
-      .mockResolvedValueOnce({ data: { healthy: true, version: "1.2.3" }, error: null })
+      .mockResolvedValueOnce({ healthy: true, version: "1.2.3" })
       .mockRejectedValueOnce(new Error("offline"));
     mocked.findServerPidMock.mockResolvedValue(456);
     mocked.killServerProcessMock.mockResolvedValue(true);
@@ -122,7 +118,7 @@ describe("bot/commands/opencode-stop", () => {
 
   it("reports stop_error when process termination fails", async () => {
     const ctx = createContext();
-    mocked.healthMock.mockResolvedValue({ data: { healthy: true, version: "1.2.3" }, error: null });
+    mocked.healthMock.mockResolvedValue({ healthy: true, version: "1.2.3" });
     mocked.findServerPidMock.mockResolvedValue(456);
     mocked.killServerProcessMock.mockResolvedValue(false);
 

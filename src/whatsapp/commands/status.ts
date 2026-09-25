@@ -1,4 +1,4 @@
-import { opencodeClient } from "../../opencode/client.js";
+import { checkServerHealth } from "../../opencode/client-v2.js";
 import { getCurrentSession } from "../../session/manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { fetchCurrentAgent } from "../../agent/manager.js";
@@ -9,9 +9,9 @@ import type { WhatsAppCommandHandler } from "./types.js";
 
 export const statusCommand: WhatsAppCommandHandler = async (ctx) => {
   try {
-    const { data, error } = await opencodeClient.global.health();
+    const { healthy, version, error } = await checkServerHealth();
 
-    if (error || !data) {
+    if (error || !healthy) {
       await ctx.reply("⚠️ Server unavailable.");
       return;
     }
@@ -19,9 +19,9 @@ export const statusCommand: WhatsAppCommandHandler = async (ctx) => {
     const lines: string[] = [];
     lines.push("*Opencode-Assistant status*");
     lines.push("");
-    lines.push(`Health: ${data.healthy ? "✅ healthy" : "⚠️ unhealthy"}`);
-    if (data.version) {
-      lines.push(`Version: ${data.version}`);
+    lines.push("Health: ✅ healthy");
+    if (version) {
+      lines.push(`Version: ${version}`);
     }
 
     try {

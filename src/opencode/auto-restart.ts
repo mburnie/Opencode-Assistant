@@ -1,6 +1,6 @@
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
-import { opencodeClient } from "./client.js";
+import { checkServerHealth } from "./client-v2.js";
 import {
   resolveLocalOpencodeTarget,
   startLocalOpencodeServer,
@@ -16,8 +16,8 @@ function sleep(ms: number): Promise<void> {
 
 async function isOpencodeServerHealthy(): Promise<boolean> {
   try {
-    const { data, error } = await opencodeClient.global.health();
-    return !error && data?.healthy === true;
+    const { healthy } = await checkServerHealth();
+    return healthy;
   } catch {
     return false;
   }

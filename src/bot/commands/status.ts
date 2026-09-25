@@ -1,5 +1,5 @@
 import { CommandContext, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { checkServerHealth } from "../../opencode/client-v2.js";
 import { getGitWorktreeContext } from "../../git/worktree.js";
 import { getCurrentSession } from "../../session/manager.js";
 import { getCurrentProject, isTtsEnabled } from "../../settings/manager.js";
@@ -13,17 +13,16 @@ import { sendBotText } from "../utils/telegram-text.js";
 
 export async function statusCommand(ctx: CommandContext<Context>) {
   try {
-    const { data, error } = await opencodeClient.global.health();
+    const { healthy, version, error } = await checkServerHealth();
 
-    if (error || !data) {
+    if (error || !healthy) {
       throw error || new Error("No data received from server");
     }
 
     let message = `${t("status.header_running")}\n\n`;
-    const healthLabel = data.healthy ? t("status.health.healthy") : t("status.health.unhealthy");
-    message += `${t("status.line.health", { health: healthLabel })}\n`;
-    if (data.version) {
-      message += `${t("status.line.version", { version: data.version })}\n`;
+    message += `${t("status.line.health", { health: t("status.health.healthy") })}\n`;
+    if (version) {
+      message += `${t("status.line.version", { version })}\n`;
     }
     message += `${t("status.line.tts", {
       tts: isTtsEnabled() ? t("status.tts.on") : t("status.tts.off"),

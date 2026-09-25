@@ -1,11 +1,12 @@
 import { CommandContext, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { getActiveSessions, interruptSession } from "../../opencode/client-v2.js";
 import { getCurrentSession } from "../../session/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { foregroundSessionState } from "../../scheduled-task/foreground-state.js";
 import { assistantRunState } from "../assistant-run-state.js";
+import { markAttachedSessionIdle } from "../../attach/service.js";
 
 type SessionState = "idle" | "busy" | "not-found";
 
@@ -21,7 +22,7 @@ function abortLocalStreaming(): void {
 
 async function pollSessionStatus(
   sessionId: string,
-  directory: string,
+  _directory: string,
   maxWaitMs: number = 5000,
 ): Promise<SessionState> {
   const startedAt = Date.now();
@@ -29,26 +30,23 @@ async function pollSessionStatus(
 
   while (Date.now() - startedAt < maxWaitMs) {
     try {
-      const { data, error } = await opencodeClient.session.status({ directory });
+      const { data, error } = await getActiveSessions();
 
       if (error || !data) {
         break;
       }
 
-      const sessionStatus = (data as Record<string, { type?: string }>)[sessionId];
+      const sessionStatus = data[sessionId];
       if (!sessionStatus) {
-        return "not-found";
-      }
-
-      if (sessionStatus.type === "idle" || sessionStatus.type === "error") {
         return "idle";
       }
 
-      if (sessionStatus.type !== "busy") {
-        return "not-found";
+      if (sessionStatus.type === "running") {
+        await sleep(pollIntervalMs);
+        continue;
       }
 
-      await sleep(pollIntervalMs);
+      return "idle";
     } catch (error) {
       logger.warn("[Abort] Failed to poll session status:", error);
       break;
@@ -94,12 +92,9 @@ export async function abortCurrentOperation(
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
     try {
-      const { data: abortResult, error: abortError } = await opencodeClient.session.abort(
-        {
-          sessionID: currentSession.id,
-          directory: currentSession.directory,
-        },
-        { signal: controller.signal },
+      const { data: abortResult, error: abortError } = await interruptSession(
+        currentSession.id,
+        false,
       );
 
       clearTimeout(timeoutId);
@@ -112,7 +107,7 @@ export async function abortCurrentOperation(
         return;
       }
 
-      if (abortResult !== true) {
+      if (!abortResult) {
         if (notifyUser && chatId !== null && waitingMessageId !== null) {
           await ctx.api.editMessageText(chatId, waitingMessageId, t("stop.warn_maybe_finished"));
         }
@@ -128,6 +123,7 @@ export async function abortCurrentOperation(
       if (finalStatus === "idle" || finalStatus === "not-found") {
         foregroundSessionState.markIdle(currentSession.id);
         assistantRunState.clearRun(currentSession.id, "abort_confirmed");
+        await markAttachedSessionIdle(currentSession.id);
         if (notifyUser && chatId !== null && waitingMessageId !== null) {
           await ctx.api.editMessageText(chatId, waitingMessageId, t("stop.success"));
         }

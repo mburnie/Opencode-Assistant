@@ -26,13 +26,13 @@ const mocked = vi.hoisted(() => ({
   ensureEventSubscriptionMock: vi.fn(),
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    session: {
-      list: mocked.sessionListMock,
-      get: mocked.sessionGetMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  listSessions: mocked.sessionListMock,
+  getSession: mocked.sessionGetMock,
+}));
+
+vi.mock("../../../src/opencode/client-v2-messages.js", () => ({
+  listMessages: vi.fn().mockResolvedValue({ data: [], error: null }),
 }));
 
 vi.mock("../../../src/settings/manager.js", () => ({
@@ -175,7 +175,7 @@ describe("bot/commands/sessions", () => {
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
       alreadyAttached: false,
-      restoredQuestion: false,
+      restoredForm: false,
       restoredPermissions: 0,
     });
     mocked.ensureEventSubscriptionMock.mockReset();
@@ -321,7 +321,7 @@ describe("bot/commands/sessions", () => {
     expect(ctx.reply).toHaveBeenCalledWith(t("sessions.select_error"));
   });
 
-  it("resolves the project agent before sending the keyboard for an existing session", async () => {
+  it("attaches to an existing session after selection", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
       data: createSession(0),
       error: null,
@@ -341,7 +341,6 @@ describe("bot/commands/sessions", () => {
     const handled = await handleSessionSelect(ctx, createDeps());
 
     expect(handled).toBe(true);
-    expect(mocked.resolveProjectAgentMock).toHaveBeenCalledOnce();
 
     expect(mocked.attachToSessionMock).toHaveBeenCalledWith({
       bot: expect.any(Object),
@@ -356,9 +355,6 @@ describe("bot/commands/sessions", () => {
     expect((ctx.api.sendMessage as ReturnType<typeof vi.fn>).mock.calls[1]).toEqual([
       111,
       t("sessions.selected", { title: "Session 1" }),
-      expect.objectContaining({
-        reply_markup: { inline_keyboard: [] },
-      }),
     ]);
   });
 

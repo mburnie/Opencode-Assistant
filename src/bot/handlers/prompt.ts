@@ -1,12 +1,17 @@
 import { Bot, Context } from "grammy";
-import type { FilePartInput, TextPartInput } from "@opencode-ai/sdk/v2";
-import { opencodeClient } from "../../opencode/client.js";
+import {
+  createSession,
+  getActiveSessions,
+  promptSession,
+  type LegacyFilePart,
+  type LegacyTextPart,
+} from "../../opencode/client-v2.js";
 import { clearSession, getCurrentSession, setCurrentSession } from "../../session/manager.js";
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
 import { getCurrentProject, isTtsEnabled } from "../../settings/manager.js";
 import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
-import { getStoredModel } from "../../model/manager.js";
+import { getStoredModel, isFreeModel } from "../../model/manager.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { stopEventListening } from "../../opencode/events.js";
 import { interactionManager } from "../../interaction/manager.js";
@@ -32,6 +37,24 @@ let chatIdInstance: number | null = null;
 const promptResponseModes = new Map<string, PromptResponseMode>();
 
 export type PromptResponseMode = "text_only" | "text_and_tts";
+
+/**
+ * Injected into the prompt when the selected model is free (zero cost).
+ * Free models may work normally inside the current task and the active
+ * project without approval. Approval is only required when crossing into
+ * anything outside the active project or task scope (unrelated files or
+ * directories, secrets, personal memory, health information, accounts,
+ * system configuration, services, external side effects, or destructive
+ * actions), and a previous approval never extends to other actions.
+ */
+const FREE_MODEL_SCOPE_INSTRUCTION =
+  "SECURITY CONSTRAINT (free-plan session): " +
+  "You may work normally inside the current task and the active project without asking. " +
+  "Before crossing into anything OUTSIDE the active project or task scope — unrelated files " +
+  "or directories, secrets or credentials, personal memory, health information, accounts, " +
+  "private user data, system configuration, services, external side effects, or destructive " +
+  "actions — state your exact intended action and target, then wait for explicit user approval. " +
+  "An approval covers only the one action it was given for; never reuse or extend it.";
 
 type ProcessPromptOptions = {
   responseMode?: PromptResponseMode;
@@ -59,22 +82,22 @@ export function consumePromptResponseMode(sessionId: string): PromptResponseMode
   return responseMode;
 }
 
-async function isSessionBusy(sessionId: string, directory: string): Promise<boolean> {
+async function isSessionBusy(sessionId: string, _directory: string): Promise<boolean> {
   try {
-    const { data, error } = await opencodeClient.session.status({ directory });
+    const { data, error } = await getActiveSessions();
 
     if (error || !data) {
       logger.warn("[Bot] Failed to check session status before prompt:", error);
       return false;
     }
 
-    const sessionStatus = (data as Record<string, { type?: string }>)[sessionId];
+    const sessionStatus = data[sessionId];
     if (!sessionStatus) {
       return false;
     }
 
     logger.debug(`[Bot] Current session status before prompt: ${sessionStatus.type || "unknown"}`);
-    return sessionStatus.type === "busy";
+    return sessionStatus.type === "running";
   } catch (err) {
     logger.warn("[Bot] Error checking session status before prompt:", err);
     return false;
@@ -120,7 +143,7 @@ export async function processUserPrompt(
   ctx: Context,
   text: string,
   deps: ProcessPromptDeps,
-  fileParts: FilePartInput[] = [],
+  fileParts: LegacyFilePart[] = [],
   options: ProcessPromptOptions = {},
 ): Promise<boolean> {
   const { bot, ensureEventSubscription } = deps;
@@ -150,7 +173,7 @@ export async function processUserPrompt(
   if (!currentSession) {
     await ctx.reply(t("bot.creating_session"));
 
-    const { data: session, error } = await opencodeClient.session.create({
+    const { data: session, error } = await createSession({
       directory: currentProject.worktree,
     });
 
@@ -165,7 +188,7 @@ export async function processUserPrompt(
 
     currentSession = {
       id: session.id,
-      title: session.title,
+      title: session.title ?? "Untitled",
       directory: currentProject.worktree,
     };
 
@@ -176,6 +199,10 @@ export async function processUserPrompt(
     logger.info(
       `[Bot] Using existing session: id=${currentSession.id}, title="${currentSession.title}"`,
     );
+  }
+
+  if (!currentSession) {
+    return false;
   }
 
   await attachToSession({
@@ -200,54 +227,46 @@ export async function processUserPrompt(
     const currentAgent = await resolveProjectAgent(getStoredAgent());
     const storedModel = getStoredModel();
 
-    // Build parts array with text and files
-    const parts: Array<TextPartInput | FilePartInput> = [];
-
-    // Add text part if present — inject memory context for new sessions
+    // Build prompt text and file list for the new SDK shape.
+    let promptText = "";
     if (text.trim().length > 0) {
-      const enrichedText = await injectMemoryIntoPrompt(text, currentSession.id, {
+      promptText = await injectMemoryIntoPrompt(text, currentSession.id, {
         channel: "telegram",
       });
-      parts.push({ type: "text", text: enrichedText });
     }
 
-    // Add file parts
-    parts.push(...fileParts);
+    const promptFiles: LegacyFilePart[] = fileParts.filter(
+      (part): part is LegacyFilePart => part.type === "file",
+    );
 
-    // If no text and files exist, use a placeholder
-    if (parts.length === 0 || (parts.length > 0 && parts.every((p) => p.type === "file"))) {
-      if (fileParts.length > 0) {
-        // Files without text - add a minimal system prompt
-        parts.unshift({ type: "text", text: "See attached file" });
-      }
+    // If only files are provided, add a minimal text prompt.
+    if (promptText.length === 0 && promptFiles.length > 0) {
+      promptText = "See attached file";
     }
 
-    const promptOptions: {
-      sessionID: string;
-      directory: string;
-      parts: Array<TextPartInput | FilePartInput>;
-      model?: { providerID: string; modelID: string };
-      agent?: string;
-      variant?: string;
-    } = {
-      sessionID: currentSession.id,
-      directory: currentSession.directory,
-      parts,
-      agent: currentAgent,
-    };
-
-    // Use stored model (from settings or config)
-    if (storedModel.providerID && storedModel.modelID) {
-      promptOptions.model = {
-        providerID: storedModel.providerID,
-        modelID: storedModel.modelID,
-      };
-
-      // Add variant if specified
-      if (storedModel.variant) {
-        promptOptions.variant = storedModel.variant;
-      }
+    // Free models get no implicit access beyond the current task: append the
+    // approval-scope constraint so out-of-scope accesses must be explicitly
+    // approved (tool-level permission rules back this up for write/shell/etc.).
+    const currentModelIsFree =
+      storedModel.providerID && storedModel.modelID
+        ? await isFreeModel(storedModel.providerID, storedModel.modelID)
+        : false;
+    if (currentModelIsFree) {
+      logger.info(
+        `[Bot] Free model detected (${storedModel.providerID}/${storedModel.modelID}); ` +
+          "appending approval-scope instruction",
+      );
+      promptText = `${promptText}\n\n${FREE_MODEL_SCOPE_INSTRUCTION}`.trim();
     }
+
+    const promptModel =
+      storedModel.providerID && storedModel.modelID
+        ? {
+            providerID: storedModel.providerID,
+            modelID: storedModel.modelID,
+            variant: storedModel.variant,
+          }
+        : undefined;
 
     const promptErrorLogContext = {
       sessionId: currentSession.id,
@@ -261,7 +280,7 @@ export async function processUserPrompt(
     };
 
     logger.info(
-      `[Bot] Calling session.promptAsync (start-only) with agent=${currentAgent}, fileCount=${fileParts.length}...`,
+      `[Bot] Calling session.prompt with agent=${currentAgent}, fileCount=${fileParts.length}...`,
     );
 
     foregroundSessionState.markBusy(currentSession.id);
@@ -284,8 +303,15 @@ export async function processUserPrompt(
     // "failed to send" messages even after the run has already started.
     // The actual assistant result still arrives via the SSE event subscription.
     safeBackgroundTask({
-      taskName: "session.promptAsync",
-      task: () => opencodeClient.session.promptAsync(promptOptions),
+      taskName: "session.prompt",
+      task: () =>
+        promptSession({
+          sessionID: currentSession.id,
+          text: promptText,
+          files: promptFiles,
+          agent: currentAgent,
+          model: promptModel,
+        }),
       onSuccess: ({ error }) => {
         if (error) {
           foregroundSessionState.markIdle(currentSession.id);
@@ -294,18 +320,18 @@ export async function processUserPrompt(
           clearPromptResponseMode(currentSession.id);
           const details = formatErrorDetails(error, 6000);
           logger.error(
-            "[Bot] OpenCode API returned an error for session.promptAsync",
+            "[Bot] OpenCode API returned an error for session.prompt",
             promptErrorLogContext,
           );
-          logger.error("[Bot] session.promptAsync error details:", details);
-          logger.error("[Bot] session.promptAsync raw API error object:", error);
+          logger.error("[Bot] session.prompt error details:", details);
+          logger.error("[Bot] session.prompt raw API error object:", error);
 
           // Send user-friendly error via API directly because ctx is no longer available
           void bot.api.sendMessage(ctx.chat!.id, t("bot.prompt_send_error")).catch(() => {});
           return;
         }
 
-        logger.info("[Bot] session.promptAsync accepted");
+        logger.info("[Bot] session.prompt accepted");
       },
       onError: (error) => {
         foregroundSessionState.markIdle(currentSession.id);
@@ -313,9 +339,9 @@ export async function processUserPrompt(
         assistantRunState.clearRun(currentSession.id, "session_prompt_background_error");
         clearPromptResponseMode(currentSession.id);
         const details = formatErrorDetails(error, 6000);
-        logger.error("[Bot] session.promptAsync background task failed", promptErrorLogContext);
-        logger.error("[Bot] session.promptAsync background failure details:", details);
-        logger.error("[Bot] session.promptAsync raw background error object:", error);
+        logger.error("[Bot] session.prompt background task failed", promptErrorLogContext);
+        logger.error("[Bot] session.prompt background failure details:", details);
+        logger.error("[Bot] session.prompt raw background error object:", error);
         void bot.api.sendMessage(ctx.chat!.id, t("bot.prompt_send_error")).catch(() => {});
       },
     });

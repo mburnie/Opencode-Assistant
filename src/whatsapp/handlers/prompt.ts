@@ -1,22 +1,14 @@
-import { opencodeClient } from "../../opencode/client.js";
+import { promptSession } from "../../opencode/client-v2.js";
 import { getCurrentSession } from "../../session/manager.js";
-import { getCurrentProject, isTtsEnabled } from "../../settings/manager.js";
+import { getCurrentProject } from "../../settings/manager.js";
 import { injectMemoryIntoPrompt } from "../../memory/injector.js";
-import { isTtsConfigured, synthesizeSpeech } from "../../tts/client.js";
 import { logger } from "../../utils/logger.js";
-import { collectResponseText, type ResponsePart } from "../utils/response-text.js";
-import { chunkForWhatsApp } from "../utils/chunking.js";
-import { mp3ToOpusOgg } from "../utils/audio-convert.js";
 import type { WhatsAppCommandContext } from "../commands/types.js";
 
 // Tracks whether a session is currently being prompted from WhatsApp so a
 // second message from the same user doesn't fire a parallel prompt against
 // the same session (OpenCode rejects concurrent prompts on a busy session).
 const inFlightBySession = new Set<string>();
-
-interface PromptResponse {
-  parts?: ResponsePart[];
-}
 
 export async function handlePromptText(
   ctx: WhatsAppCommandContext,
@@ -53,10 +45,9 @@ export async function handlePromptText(
   try {
     const enrichedText = await injectMemoryIntoPrompt(text, session.id, { channel: "whatsapp" });
 
-    const result = await opencodeClient.session.prompt({
+    const result = await promptSession({
       sessionID: session.id,
-      directory: session.directory,
-      parts: [{ type: "text", text: enrichedText }],
+      text: enrichedText,
     });
 
     if (result.error) {
@@ -67,46 +58,13 @@ export async function handlePromptText(
       return;
     }
 
-    const response = result.data as PromptResponse | undefined;
-    const responseText = collectResponseText(response?.parts ?? null);
-
-    if (!responseText) {
-      await ctx.reply("(Empty response from the model.)");
-      return;
-    }
-
-    const chunks = chunkForWhatsApp(responseText);
-    for (const chunk of chunks) {
-      await ctx.reply(chunk);
-    }
-
-    if (isTtsEnabled() && isTtsConfigured()) {
-      // Best-effort: TTS failures shouldn't make the user lose the text reply
-      // they already received. Log and move on.
-      try {
-        const audio = await synthesizeSpeech(responseText);
-        // Try to deliver as a real WhatsApp voice note (push-to-talk with
-        // waveform) — that requires OGG/Opus, which TTS providers don't
-        // emit directly. Transcode via ffmpeg. If anything in the
-        // pipeline fails (no ffmpeg in container, weird MP3 from the
-        // provider, etc.) fall back to a plain music-player audio so the
-        // user still hears the reply.
-        try {
-          const opusBytes = await mp3ToOpusOgg(audio.buffer);
-          await ctx.bot.sendVoice(ctx.jid, opusBytes, {
-            mimeType: "audio/ogg; codecs=opus",
-          });
-        } catch (transcodeErr) {
-          logger.warn(
-            "[WhatsApp][prompt] OPUS transcode failed, sending MP3 as audio attachment",
-            transcodeErr,
-          );
-          await ctx.bot.sendAudio(ctx.jid, audio.buffer, { mimeType: audio.mimeType });
-        }
-      } catch (ttsErr) {
-        logger.warn("[WhatsApp][prompt] TTS failed, text reply still delivered", ttsErr);
-      }
-    }
+    // The new SDK prompt endpoint only enqueues the user message; the assistant
+    // reply arrives via the SSE event stream. WhatsApp currently has no event
+    // subscription, so we cannot synchronously return the model response here.
+    // Telegram-style event wiring would be needed for full WhatsApp responses.
+    await ctx.reply(
+      "✅ Message sent to OpenCode. WhatsApp replies require event subscription (not yet wired).",
+    );
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       await ctx.reply("Request was aborted.");

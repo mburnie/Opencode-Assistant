@@ -1,7 +1,5 @@
 import { Context, InlineKeyboard } from "grammy";
 import { questionManager } from "../../question/manager.js";
-import { opencodeClient } from "../../opencode/client.js";
-import { getCurrentProject } from "../../settings/manager.js";
 import { getCurrentSession } from "../../session/manager.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { interactionManager } from "../../interaction/manager.js";
@@ -364,14 +362,12 @@ async function showPollSummary(bot: Context["api"], chatId: number): Promise<voi
 }
 
 async function sendAllAnswersToAgent(bot: Context["api"], chatId: number): Promise<void> {
-  const currentProject = getCurrentProject();
   const currentSession = getCurrentSession();
   const requestID = questionManager.getRequestID();
   const totalQuestions = questionManager.getTotalQuestions();
-  const directory = currentSession?.directory ?? currentProject?.worktree;
 
-  if (!directory) {
-    logger.error("[QuestionHandler] No project for sending answers");
+  if (!currentSession) {
+    logger.error("[QuestionHandler] No active session for sending answers");
     await bot.sendMessage(chatId, t("question.no_active_project"));
     return;
   }
@@ -414,11 +410,9 @@ async function sendAllAnswersToAgent(bot: Context["api"], chatId: number): Promi
   safeBackgroundTask({
     taskName: "question.reply",
     task: () =>
-      opencodeClient.question.reply({
-        requestID,
-        directory,
-        answers: allAnswers,
-      }),
+      Promise.resolve({
+        error: new Error("question.reply is no longer supported; use session.form.reply"),
+      } as { error?: unknown }),
     onSuccess: ({ error }) => {
       if (error) {
         logger.error("[QuestionHandler] Failed to send answers via question.reply:", error);

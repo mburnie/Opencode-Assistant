@@ -1,7 +1,295 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Event } from "@opencode-ai/sdk/v2";
+import type { V2Event } from "@opencode/client/promise";
 import { summaryAggregator } from "../../src/summary/aggregator.js";
 import { t } from "../../src/i18n/index.js";
+
+/**
+ * Test-only helper: converts a legacy event fixture { type, properties } to a
+ * native V2Event shape.  Covers the legacy event types actually used in these
+ * tests.  Unrecognised types are passed through with an empty `data` object.
+ */
+function toV2Event(
+  legacy: { type: string; properties: Record<string, unknown> },
+  extra?: Record<string, unknown>,
+): V2Event {
+  const { type, properties } = legacy;
+
+  const base = {
+    id: "evt-1",
+    created: Date.now(),
+    ...extra,
+  };
+
+  switch (type) {
+    case "session.created":
+      return {
+        ...base,
+        type: "session.created",
+        durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+        data: {
+          sessionID: (properties.info as any)?.id ?? "session-1",
+          parentID: (properties.info as any)?.parentID,
+          title: (properties.info as any)?.title,
+        },
+      } as V2Event;
+
+    case "session.updated":
+      return {
+        ...base,
+        type: "session.renamed",
+        durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+        data: {
+          sessionID: (properties.info as any)?.id ?? "session-1",
+          title: (properties.info as any)?.title,
+        },
+      } as V2Event;
+
+    case "session.status":
+      return {
+        ...base,
+        type: "session.status",
+        data: {
+          sessionID: (properties as any).sessionID ?? "session-1",
+          status: (properties as any).status ?? { type: "busy" },
+        },
+      } as V2Event;
+
+    case "session.idle":
+      return {
+        ...base,
+        type: "session.idle",
+        data: { sessionID: (properties as any).sessionID ?? "session-1" },
+      } as V2Event;
+
+    case "session.error":
+      return {
+        ...base,
+        type: "session.execution.failed",
+        durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+        data: {
+          sessionID: (properties as any).sessionID ?? "session-1",
+          error: {
+            type: "error",
+            message: (properties as any).error?.message ?? (properties as any).error ?? "error",
+          },
+        },
+      } as V2Event;
+
+    case "session.compacted":
+      return {
+        ...base,
+        type: "session.compaction.ended",
+        data: { sessionID: (properties as any).sessionID ?? "session-1" },
+      } as V2Event;
+
+    case "message.updated": {
+      const info = (properties as any).info;
+      // Convert to session.text.started + session.text.ended pair
+      return {
+        ...base,
+        type: "session.text.ended",
+        durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+        data: {
+          sessionID: info.sessionID,
+          assistantMessageID: info.id,
+          ordinal: 0,
+          text: "",
+          state: undefined,
+        },
+      } as V2Event;
+    }
+
+    case "message.part.updated": {
+      const part = (properties as any).part;
+      if (part.type === "tool") {
+        if (part.state?.status === "completed") {
+          return {
+            ...base,
+            type: "session.tool.success",
+            durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+            data: {
+              sessionID: part.sessionID,
+              assistantMessageID: part.messageID,
+              id: part.callID,
+              content: [] as any,
+              metadata: { tool: part.tool, ...(part.state.metadata || {}) },
+              executed: true,
+            },
+          } as V2Event;
+        }
+        if (part.state?.status === "error") {
+          return {
+            ...base,
+            type: "session.tool.failed",
+            durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+            data: {
+              sessionID: part.sessionID,
+              assistantMessageID: part.messageID,
+              id: part.callID,
+              error: { type: "error", message: "tool failed" },
+              content: [] as any,
+              metadata: { tool: part.tool, ...(part.state.metadata || {}) },
+              executed: false,
+            },
+          } as V2Event;
+        }
+        // streaming/running
+        return {
+          ...base,
+          type: "session.tool.called",
+          durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+          data: {
+            sessionID: part.sessionID,
+            assistantMessageID: part.messageID,
+            id: part.callID,
+            input: { tool: part.tool, ...(part.state?.input || {}) },
+            executed: false,
+          },
+        } as V2Event;
+      }
+      if (part.type === "text") {
+        return {
+          ...base,
+          type: "session.text.ended",
+          durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+          data: {
+            sessionID: part.sessionID,
+            assistantMessageID: part.messageID,
+            ordinal: 0,
+            text: part.text ?? "",
+          },
+        } as V2Event;
+      }
+      if (part.type === "reasoning") {
+        return {
+          ...base,
+          type: "session.reasoning.started",
+          durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+          data: {
+            sessionID: part.sessionID,
+            assistantMessageID: part.messageID,
+            ordinal: 0,
+          },
+        } as V2Event;
+      }
+      if (part.type === "subtask") {
+        // Map subtask to session.created for the child session
+        return {
+          ...base,
+          type: "session.created",
+          durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+          data: {
+            sessionID: "child-session",
+            parentID: part.sessionID,
+            title: part.description || "subtask",
+          },
+        } as V2Event;
+      }
+      // step-start / step-finish
+      if (part.type === "step-start") {
+        return {
+          ...base,
+          type: "session.step.started",
+          durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+          data: { sessionID: part.sessionID },
+        } as V2Event;
+      }
+      if (part.type === "step-finish") {
+        return {
+          ...base,
+          type: "session.step.ended",
+          durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+          data: {
+            sessionID: part.sessionID,
+            tokens: part.tokens,
+            cost: part.cost,
+          },
+        } as V2Event;
+      }
+      // Fallback: unknown part type
+      return {
+        ...base,
+        type: "session.text.ended",
+        durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+        data: { sessionID: part.sessionID, assistantMessageID: part.messageID, ordinal: 0, text: "" },
+      } as V2Event;
+    }
+
+    case "message.part.delta": {
+      const partProps = (properties as any).part;
+      return {
+        ...base,
+        type: "session.text.delta",
+        durable: { aggregateID: "agg-1", seq: 1, version: 1 },
+        data: {
+          sessionID: partProps?.sessionID ?? (properties as any).sessionID ?? "session-1",
+          assistantMessageID: partProps?.messageID ?? (properties as any).messageID ?? "message-1",
+          ordinal: 0,
+          delta: (properties as any).delta ?? "",
+          state: undefined,
+        },
+      } as V2Event;
+    }
+
+    case "form.created":
+      return {
+        ...base,
+        type: "form.created",
+        data: { form: (properties as any).form },
+      } as V2Event;
+
+    case "form.replied":
+      return {
+        ...base,
+        type: "form.replied",
+        data: { id: (properties as any).id, sessionID: (properties as any).sessionID },
+      } as V2Event;
+
+    case "form.cancelled":
+      return {
+        ...base,
+        type: "form.cancelled",
+        data: { id: (properties as any).id, sessionID: (properties as any).sessionID },
+      } as V2Event;
+
+    case "permission.asked":
+      return {
+        ...base,
+        type: "permission.asked",
+        data: { ...(properties as any) },
+      } as V2Event;
+
+    case "session.diff":
+      // V1-only; ignore
+      return {
+        ...base,
+        type: "session.idle",
+        data: { sessionID: (properties as any).sessionID ?? "session-1" },
+      } as V2Event;
+
+    case "question.asked":
+      // Removed in V2; convert to form.created
+      return {
+        ...base,
+        type: "form.created",
+        data: {
+          form: {
+            id: (properties as any).id ?? "q-1",
+            sessionID: (properties as any).sessionID ?? "session-1",
+            title: "Question",
+            fields: [],
+          },
+        },
+      } as V2Event;
+
+    default:
+      return {
+        ...base,
+        type: type as any,
+        data: properties as any,
+      } as V2Event;
+  }
+}
 
 const mocked = vi.hoisted(() => ({
   getCurrentProjectMock: vi.fn(),
@@ -49,7 +337,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnTool(onTool);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -59,9 +347,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -80,7 +368,7 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onTool).toHaveBeenCalledTimes(1);
     expect(onTool.mock.calls[0][0]).toEqual(
@@ -98,7 +386,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnSubagent(onSubagent);
     summaryAggregator.setSession("root-session");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -112,9 +400,9 @@ describe("summary/aggregator", () => {
           command: "inspect",
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -137,9 +425,9 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.created",
       properties: {
         info: {
@@ -153,9 +441,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now(), updated: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -178,9 +466,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -203,7 +491,7 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onSubagent).toHaveBeenCalled();
     expect(onSubagent.mock.lastCall?.[0]).toBe("root-session");
@@ -237,7 +525,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnSubagent(onSubagent);
     summaryAggregator.setSession("root-session");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -250,9 +538,9 @@ describe("summary/aggregator", () => {
           agent: "explore",
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -271,7 +559,7 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onSubagent.mock.lastCall?.[1]).toEqual([
       expect.objectContaining({
@@ -294,7 +582,7 @@ describe("summary/aggregator", () => {
     ];
 
     for (const item of subtasks) {
-      summaryAggregator.processEvent({
+      summaryAggregator.processEvent(toV2Event({
         type: "message.part.updated",
         properties: {
           part: {
@@ -307,9 +595,9 @@ describe("summary/aggregator", () => {
             agent: item.agent,
           },
         },
-      } as unknown as Event);
+      }) as V2Event);
 
-      summaryAggregator.processEvent({
+      summaryAggregator.processEvent(toV2Event({
         type: "session.created",
         properties: {
           info: {
@@ -323,9 +611,9 @@ describe("summary/aggregator", () => {
             time: { created: Date.now(), updated: Date.now() },
           },
         },
-      } as unknown as Event);
+      }) as V2Event);
 
-      summaryAggregator.processEvent({
+      summaryAggregator.processEvent(toV2Event({
         type: "message.part.updated",
         properties: {
           part: {
@@ -344,7 +632,7 @@ describe("summary/aggregator", () => {
             },
           },
         },
-      } as unknown as Event);
+      }) as V2Event);
     }
 
     expect(onSubagent.mock.lastCall?.[1]).toHaveLength(2);
@@ -367,7 +655,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnSubagent(onSubagent);
     summaryAggregator.setSession("root-session");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -380,9 +668,9 @@ describe("summary/aggregator", () => {
           agent: "explore",
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.created",
       properties: {
         info: {
@@ -396,16 +684,16 @@ describe("summary/aggregator", () => {
           time: { created: Date.now(), updated: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.idle",
       properties: {
         sessionID: "child-done",
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -418,9 +706,9 @@ describe("summary/aggregator", () => {
           agent: "general",
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.created",
       properties: {
         info: {
@@ -434,9 +722,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now(), updated: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.error",
       properties: {
         sessionID: "child-error",
@@ -444,7 +732,7 @@ describe("summary/aggregator", () => {
           data: { message: "Task failed" },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onSubagent.mock.lastCall?.[1]).toEqual([
       expect.objectContaining({ sessionId: "child-done", status: "completed" }),
@@ -461,7 +749,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnSubagent(onSubagent);
     summaryAggregator.setSession("root-session");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -474,9 +762,9 @@ describe("summary/aggregator", () => {
           agent: "explore",
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.created",
       properties: {
         info: {
@@ -490,21 +778,21 @@ describe("summary/aggregator", () => {
           time: { created: Date.now(), updated: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.idle",
       properties: {
         sessionID: "child-done",
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onSubagent.mock.lastCall?.[1]).toEqual([
       expect.objectContaining({ sessionId: "child-done", status: "completed" }),
     ]);
     const callsAfterIdle = onSubagent.mock.calls.length;
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.updated",
       properties: {
         info: {
@@ -518,7 +806,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now(), updated: Date.now() + 1000 },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onSubagent).toHaveBeenCalledTimes(callsAfterIdle);
   });
@@ -530,7 +818,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnToolFile(onToolFile);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -540,9 +828,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -562,7 +850,7 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onTool).toHaveBeenCalledTimes(1);
     expect(onTool.mock.calls[0][0]).toEqual(
@@ -579,7 +867,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnThinking(onThinking);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -589,9 +877,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -603,7 +891,7 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -618,7 +906,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnComplete(onComplete);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -628,9 +916,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -642,9 +930,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -654,7 +942,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now(), completed: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onPartial).toHaveBeenCalledWith("session-1", "message-stream-1", "Partial answer");
     expect(onComplete).toHaveBeenCalledWith(
@@ -670,7 +958,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnExternalUserInput(onExternalUserInput);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -682,9 +970,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -694,7 +982,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -710,7 +998,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnExternalUserInput(onExternalUserInput);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -722,9 +1010,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -734,7 +1022,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -746,7 +1034,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnExternalUserInput(onExternalUserInput);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -758,9 +1046,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -770,7 +1058,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -785,7 +1073,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnComplete(onComplete);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -795,9 +1083,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -809,9 +1097,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -823,9 +1111,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -835,7 +1123,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now(), completed: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onPartial).toHaveBeenLastCalledWith("session-1", "message-multipart-1", "Hello world");
     expect(onComplete).toHaveBeenCalledWith(
@@ -851,7 +1139,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnPartial(onPartial);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -863,9 +1151,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -877,7 +1165,7 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onPartial).toHaveBeenCalledTimes(1);
     expect(onPartial).toHaveBeenCalledWith("session-1", "message-unknown-1", "Hello");
@@ -888,7 +1176,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnPartial(onPartial);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -900,7 +1188,7 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onPartial).not.toHaveBeenCalled();
   });
@@ -912,7 +1200,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnComplete(onComplete);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -924,9 +1212,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -936,7 +1224,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now(), completed: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onPartial).not.toHaveBeenCalled();
     expect(onComplete).toHaveBeenCalledWith(
@@ -952,12 +1240,12 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnSessionIdle(onSessionIdle);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.idle",
       properties: {
         sessionID: "session-1",
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -969,7 +1257,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnComplete(onComplete);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -982,9 +1270,9 @@ describe("summary/aggregator", () => {
           time: { created: 1000 },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -996,9 +1284,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1011,7 +1299,7 @@ describe("summary/aggregator", () => {
           time: { created: 1000, completed: 2500 },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onComplete).toHaveBeenCalledWith(
       "session-1",
@@ -1032,7 +1320,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnPartial(onPartial);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.delta",
       properties: {
         part: {
@@ -1043,9 +1331,9 @@ describe("summary/aggregator", () => {
         },
         delta: "Hel",
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.delta",
       properties: {
         part: {
@@ -1056,7 +1344,7 @@ describe("summary/aggregator", () => {
         },
         delta: "lo",
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onPartial).toHaveBeenNthCalledWith(1, "session-1", "message-delta-1", "Hel");
     expect(onPartial).toHaveBeenNthCalledWith(2, "session-1", "message-delta-1", "Hello");
@@ -1067,7 +1355,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnPartial(onPartial);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.delta",
       properties: {
         part: {
@@ -1077,7 +1365,7 @@ describe("summary/aggregator", () => {
         },
         delta: "Hi",
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onPartial).toHaveBeenCalledWith("session-1", "message-delta-unknown-type", "Hi");
   });
@@ -1087,7 +1375,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnPartial(onPartial);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -1099,9 +1387,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.delta",
       properties: {
         part: {
@@ -1111,7 +1399,7 @@ describe("summary/aggregator", () => {
         },
         delta: "internal thoughts",
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onPartial).not.toHaveBeenCalled();
   });
@@ -1122,7 +1410,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setSession("session-1");
 
     // Only a message.updated event without any reasoning part — should NOT trigger thinking
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1132,9 +1420,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -1146,7 +1434,7 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -1158,7 +1446,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnThinking(onThinking);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1168,10 +1456,10 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     for (let i = 0; i < 3; i++) {
-      summaryAggregator.processEvent({
+      summaryAggregator.processEvent(toV2Event({
         type: "message.part.updated",
         properties: {
           part: {
@@ -1183,7 +1471,7 @@ describe("summary/aggregator", () => {
             time: { start: Date.now() },
           },
         },
-      } as unknown as Event);
+      }) as V2Event);
     }
 
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -1197,7 +1485,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnSessionError(onSessionError);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.error",
       properties: {
         sessionID: "session-1",
@@ -1208,7 +1496,7 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -1220,7 +1508,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnSessionRetry(onSessionRetry);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.status",
       properties: {
         sessionID: "session-1",
@@ -1231,7 +1519,7 @@ describe("summary/aggregator", () => {
           next: 1772203141283,
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -1248,7 +1536,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnToolFile(onToolFile);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1258,9 +1546,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -1294,7 +1582,7 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onToolFile).toHaveBeenCalledTimes(1);
 
@@ -1320,7 +1608,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnToolFile(onToolFile);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1330,9 +1618,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -1358,7 +1646,7 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onToolFile).toHaveBeenCalledTimes(1);
 
@@ -1381,7 +1669,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnComplete(() => {});
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1391,9 +1679,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -1405,9 +1693,9 @@ describe("summary/aggregator", () => {
           time: { start: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1419,7 +1707,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now(), completed: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onTokens).toHaveBeenCalledTimes(1);
     expect(onTokens).toHaveBeenCalledWith(
@@ -1433,7 +1721,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnTokens(onTokens);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1444,7 +1732,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onTokens).toHaveBeenCalledTimes(1);
     expect(onTokens).toHaveBeenCalledWith(
@@ -1459,7 +1747,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setSession("session-1");
 
     // First message with zero tokens (new message starting)
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1470,7 +1758,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     // The callback IS fired (filtering zero tokens is done at bot/index.ts level)
     expect(onTokens).toHaveBeenCalledTimes(1);
@@ -1482,7 +1770,7 @@ describe("summary/aggregator", () => {
     onTokens.mockClear();
 
     // Later update with real tokens
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1493,7 +1781,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onTokens).toHaveBeenCalledTimes(1);
     expect(onTokens).toHaveBeenCalledWith(
@@ -1507,7 +1795,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnTokens(onTokens);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1517,7 +1805,7 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onTokens).not.toHaveBeenCalled();
   });
@@ -1528,7 +1816,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnCost(onCost);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1545,7 +1833,7 @@ describe("summary/aggregator", () => {
           cost: 0.0123,
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onCost).toHaveBeenCalledTimes(1);
     expect(onCost).toHaveBeenCalledWith(0.0123);
@@ -1556,7 +1844,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnCost(onCost);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1572,60 +1860,18 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     expect(onCost).not.toHaveBeenCalled();
   });
 
-  // ── Question and permission flows ─────────────────────────────────────────
-  it("fires onQuestion for question.asked on the current session", async () => {
-    const onQuestion = vi.fn();
-    summaryAggregator.setOnQuestion(onQuestion);
-    summaryAggregator.setSession("session-1");
-
-    summaryAggregator.processEvent({
-      type: "question.asked",
-      properties: {
-        id: "q-req-1",
-        sessionID: "session-1",
-        questions: [{ id: "q1", text: "Use TypeScript?", type: "boolean" }],
-      },
-    } as unknown as Event);
-
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(onQuestion).toHaveBeenCalledTimes(1);
-    const [questions, requestId, sessionId] = onQuestion.mock.calls[0];
-    expect(sessionId).toBe("session-1");
-    expect(requestId).toBe("q-req-1");
-    expect(questions).toHaveLength(1);
-    expect(questions[0]).toMatchObject({ id: "q1", text: "Use TypeScript?" });
-  });
-
-  it("ignores question.asked from a non-current session", async () => {
-    const onQuestion = vi.fn();
-    summaryAggregator.setOnQuestion(onQuestion);
-    summaryAggregator.setSession("session-1");
-
-    summaryAggregator.processEvent({
-      type: "question.asked",
-      properties: {
-        id: "q-other",
-        sessionID: "session-other",
-        questions: [{ id: "q1", text: "Anything?", type: "boolean" }],
-      },
-    } as unknown as Event);
-
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(onQuestion).not.toHaveBeenCalled();
-  });
-
+  // ── Permission flows ───────────────────────────────────────────────────
   it("fires onPermission for permission.asked on the current session", async () => {
     const onPermission = vi.fn();
     summaryAggregator.setOnPermission(onPermission);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "permission.asked",
       properties: {
         id: "perm-1",
@@ -1634,7 +1880,7 @@ describe("summary/aggregator", () => {
         patterns: ["/src/**"],
         reason: "Needs to write tests",
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -1651,7 +1897,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnPermission(onPermission);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "permission.asked",
       properties: {
         id: "perm-other",
@@ -1660,7 +1906,7 @@ describe("summary/aggregator", () => {
         patterns: [],
         reason: "",
       },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise((resolve) => setImmediate(resolve));
     expect(onPermission).not.toHaveBeenCalled();
@@ -1672,10 +1918,10 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnSessionCompacted(onCompacted);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.compacted",
       properties: { sessionID: "session-1" },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -1689,41 +1935,13 @@ describe("summary/aggregator", () => {
     mocked.getCurrentProjectMock.mockReturnValue(undefined);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "session.compacted",
       properties: { sessionID: "session-1" },
-    } as unknown as Event);
+    }) as V2Event);
 
     await new Promise((resolve) => setImmediate(resolve));
     expect(onCompacted).not.toHaveBeenCalled();
-  });
-
-  // ── Session diff ──────────────────────────────────────────────────────────
-  it("fires onSessionDiff mapping each diff entry to a FileChange", async () => {
-    const onDiff = vi.fn();
-    summaryAggregator.setOnSessionDiff(onDiff);
-    summaryAggregator.setSession("session-1");
-
-    summaryAggregator.processEvent({
-      type: "session.diff",
-      properties: {
-        sessionID: "session-1",
-        diff: [
-          { file: "src/a.ts", additions: 5, deletions: 1 },
-          { file: "src/b.ts", additions: 0, deletions: 3 },
-        ],
-      },
-    } as unknown as Event);
-
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(onDiff).toHaveBeenCalledTimes(1);
-    const [sessionId, diffs] = onDiff.mock.calls[0];
-    expect(sessionId).toBe("session-1");
-    expect(diffs).toEqual([
-      { file: "src/a.ts", additions: 5, deletions: 1 },
-      { file: "src/b.ts", additions: 0, deletions: 3 },
-    ]);
   });
 
   // ── Tool dedup ────────────────────────────────────────────────────────────
@@ -1732,7 +1950,7 @@ describe("summary/aggregator", () => {
     summaryAggregator.setOnTool(onTool);
     summaryAggregator.setSession("session-1");
 
-    summaryAggregator.processEvent({
+    summaryAggregator.processEvent(toV2Event({
       type: "message.updated",
       properties: {
         info: {
@@ -1742,9 +1960,9 @@ describe("summary/aggregator", () => {
           time: { created: Date.now() },
         },
       },
-    } as unknown as Event);
+    }) as V2Event);
 
-    const toolEvent = {
+    const toolEvent = toV2Event({
       type: "message.part.updated",
       properties: {
         part: {
@@ -1761,7 +1979,7 @@ describe("summary/aggregator", () => {
           },
         },
       },
-    } as unknown as Event;
+    });
 
     summaryAggregator.processEvent(toolEvent);
     summaryAggregator.processEvent(toolEvent);

@@ -22,12 +22,8 @@ vi.mock("../../src/config.js", () => ({
   config: mocked.config,
 }));
 
-vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    global: {
-      health: mocked.healthMock,
-    },
-  },
+vi.mock("../../src/opencode/client-v2.js", () => ({
+  checkServerHealth: mocked.healthMock,
 }));
 
 vi.mock("../../src/opencode/process.js", () => ({
@@ -55,11 +51,11 @@ function createChildProcess(pid: number): ChildProcess {
 }
 
 function healthyResponse() {
-  return { data: { healthy: true, version: "1.2.3" }, error: null };
+  return { healthy: true, version: "1.2.3" };
 }
 
 function unhealthyResponse() {
-  return { data: null, error: new Error("offline") };
+  return { healthy: false, error: new Error("offline") };
 }
 
 describe("opencode/auto-restart", () => {

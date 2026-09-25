@@ -1,6 +1,6 @@
 import type { Bot } from "grammy";
 import { CommandContext, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { createSession } from "../../opencode/client-v2.js";
 import { setCurrentSession, SessionInfo } from "../../session/manager.js";
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
@@ -31,7 +31,7 @@ export async function newCommand(ctx: CommandContext<Context>, deps: NewCommandD
 
     logger.debug("[Bot] Creating new session for directory:", currentProject.worktree);
 
-    const { data: session, error } = await opencodeClient.session.create({
+    const { data: session, error } = await createSession({
       directory: currentProject.worktree,
     });
 
@@ -39,13 +39,15 @@ export async function newCommand(ctx: CommandContext<Context>, deps: NewCommandD
       throw error || new Error("No data received from server");
     }
 
+    const title = session.title ?? "Untitled";
+
     logger.info(
-      `[Bot] Created new session via /new command: id=${session.id}, title="${session.title}", project=${currentProject.worktree}`,
+      `[Bot] Created new session via /new command: id=${session.id}, title="${title}", project=${currentProject.worktree}`,
     );
 
     const sessionInfo: SessionInfo = {
       id: session.id,
-      title: session.title,
+      title,
       directory: currentProject.worktree,
     };
     setCurrentSession("telegram", sessionInfo);
@@ -59,7 +61,7 @@ export async function newCommand(ctx: CommandContext<Context>, deps: NewCommandD
       ensureEventSubscription: deps.ensureEventSubscription,
     });
 
-    await ctx.reply(t("new.created", { title: session.title }));
+    await ctx.reply(t("new.created", { title }));
   } catch (error) {
     logger.error("[Bot] Error creating session:", error);
     await ctx.reply(t("new.create_error"));

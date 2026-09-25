@@ -35,17 +35,6 @@ vi.mock("../../src/config.js", () => ({
   },
 }));
 
-vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    session: {
-      create: vi.fn(),
-      prompt: vi.fn(),
-      promptAsync: vi.fn(),
-      delete: vi.fn(),
-    },
-  },
-}));
-
 vi.mock("../../src/scheduled-task/executor.js", () => ({
   executeScheduledTask: mocked.executeScheduledTaskMock,
 }));

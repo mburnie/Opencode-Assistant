@@ -21,12 +21,8 @@ const { sessionListMock, loggerWarnMock, loggerDebugMock, loggerInfoMock, logger
     loggerErrorMock: vi.fn(),
   }));
 
-vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    session: {
-      list: sessionListMock,
-    },
-  },
+vi.mock("../../src/opencode/client-v2.js", () => ({
+  listSessions: sessionListMock,
 }));
 
 vi.mock("../../src/utils/logger.js", () => ({
@@ -82,7 +78,7 @@ describe("session/cache-manager", () => {
 
     await warmupSessionDirectoryCache();
 
-    expect(sessionListMock).toHaveBeenCalledWith({ limit: 1000 });
+    expect(sessionListMock).toHaveBeenCalledWith({ limit: 1000, order: "desc" });
 
     const directories = await getCachedSessionDirectories();
     expect(directories).toEqual([
@@ -123,11 +119,8 @@ describe("session/cache-manager", () => {
     await warmupSessionDirectoryCache();
     await syncSessionDirectoryCache({ force: true });
 
-    expect(sessionListMock).toHaveBeenNthCalledWith(1, { limit: 1000 });
-    expect(sessionListMock).toHaveBeenNthCalledWith(2, {
-      limit: 1000,
-      start: 1_700_000_000_500 - 60_000,
-    });
+    expect(sessionListMock).toHaveBeenNthCalledWith(1, { limit: 1000, order: "desc" });
+    expect(sessionListMock).toHaveBeenNthCalledWith(2, { limit: 1000, order: "desc" });
 
     const directories = await getCachedSessionDirectories();
     expect(directories.map((item) => item.worktree)).toEqual(["D:/repo-c", "D:/repo-a"]);

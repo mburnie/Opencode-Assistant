@@ -6,6 +6,7 @@ import { questionManager } from "../../../src/question/manager.js";
 import { permissionManager } from "../../../src/permission/manager.js";
 import { renameManager } from "../../../src/rename/manager.js";
 import { interactionManager } from "../../../src/interaction/manager.js";
+import { attachManager } from "../../../src/attach/manager.js";
 import type { Question } from "../../../src/question/types.js";
 import type { PermissionRequest } from "../../../src/permission/types.js";
 import { t } from "../../../src/i18n/index.js";
@@ -20,13 +21,9 @@ vi.mock("../../../src/session/manager.js", () => ({
   getCurrentSession: vi.fn(() => mocked.currentSession),
 }));
 
-vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    session: {
-      abort: mocked.abortMock,
-      status: mocked.statusMock,
-    },
-  },
+vi.mock("../../../src/opencode/client-v2.js", () => ({
+  getActiveSessions: mocked.statusMock,
+  interruptSession: mocked.abortMock,
 }));
 
 const TEST_QUESTION: Question = {
@@ -61,6 +58,7 @@ function activateInteractionState(): void {
 describe("bot/commands/abort", () => {
   beforeEach(() => {
     clearAllInteractionState("test_setup");
+    attachManager.__resetForTests();
     mocked.currentSession = null;
     mocked.abortMock.mockReset();
     mocked.statusMock.mockReset();
@@ -162,5 +160,36 @@ describe("bot/commands/abort", () => {
     expect(permissionManager.isActive()).toBe(false);
     expect(renameManager.isWaitingForName()).toBe(false);
     expect(interactionManager.getSnapshot()).toBeNull();
+  });
+
+  it("clears the attached session busy flag after successful abort", async () => {
+    mocked.currentSession = {
+      id: "session-1",
+      title: "Session",
+      directory: "D:/repo",
+    };
+
+    attachManager.attach("session-1", "D:/repo");
+    attachManager.markBusy("session-1");
+
+    mocked.abortMock.mockResolvedValue({ data: true, error: null });
+    mocked.statusMock.mockResolvedValue({
+      data: {
+        "session-1": { type: "idle" },
+      },
+      error: null,
+    });
+
+    const ctx = {
+      chat: { id: 777 },
+      reply: vi.fn().mockResolvedValue({ message_id: 88 }),
+      api: {
+        editMessageText: vi.fn().mockResolvedValue(undefined),
+      },
+    } as unknown as Context;
+
+    await abortCommand(ctx as never);
+
+    expect(attachManager.isBusy()).toBe(false);
   });
 });
