@@ -236,7 +236,7 @@ export async function showPermissionRequest(
   chatId: number,
   request: PermissionRequest,
 ): Promise<void> {
-  logger.debug(`[PermissionHandler] Showing permission request: ${request.permission}`);
+  logger.debug(`[PermissionHandler] Showing permission request: ${request.permission ?? "unknown"}`);
 
   const text = formatPermissionText(request);
   const keyboard = buildPermissionKeyboard();
@@ -262,21 +262,69 @@ export async function showPermissionRequest(
 }
 
 /**
- * Format permission request text
+ * Extract a human-readable tool name from permission metadata, if present.
+ *
+ * V2 permission payloads for MCP tools (e.g. the memory server) carry the
+ * tool identity under `metadata.toolCalls`. This is best-effort: any shape
+ * is tolerated and a missing/unknown name simply yields `null`.
+ */
+function extractToolName(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const toolCalls = (metadata as { toolCalls?: unknown }).toolCalls;
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
+    return null;
+  }
+
+  const first = toolCalls[0];
+  if (!first || typeof first !== "object") {
+    return null;
+  }
+
+  const call = first as { tool?: unknown; name?: unknown; toolName?: unknown };
+  const candidate = call.tool ?? call.name ?? call.toolName;
+  return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+}
+
+/**
+ * Format permission request text.
+ *
+ * Defensive by design: `permission`, `patterns`, and `metadata` may be
+ * missing or malformed (e.g. V2 payloads that omit `action`). This must
+ * never throw for missing optional fields.
  */
 function formatPermissionText(request: PermissionRequest): string {
-  const emoji = PERMISSION_EMOJIS[request.permission] || "🔐";
-  const nameKey = PERMISSION_NAME_KEYS[request.permission];
-  const name = nameKey ? t(nameKey) : request.permission;
+  const permission = typeof request.permission === "string" ? request.permission : "";
+  const patterns = Array.isArray(request.patterns) ? request.patterns : [];
+  const toolName = extractToolName(request.metadata);
+
+  const emoji = PERMISSION_EMOJIS[permission] || "🔐";
+  const nameKey = PERMISSION_NAME_KEYS[permission];
+
+  let name: string;
+  if (nameKey) {
+    name = t(nameKey);
+  } else if (permission) {
+    // Unknown but present permission type: show the raw identifier.
+    name = permission;
+  } else if (toolName) {
+    // Missing permission type: safe generic label plus the tool name.
+    name = t("permission.name.generic_tool", { tool: toolName });
+  } else {
+    // Nothing usable at all: fully generic, still safe.
+    name = t("permission.name.generic");
+  }
 
   let text = t("permission.header", { emoji, name });
 
-  // Show patterns (commands/files)
-  if (request.patterns.length > 0) {
-    request.patterns.forEach((pattern) => {
+  // Show patterns (commands/files). Guard against non-string entries.
+  patterns
+    .filter((pattern): pattern is string => typeof pattern === "string")
+    .forEach((pattern) => {
       text += `• ${pattern}\n`;
     });
-  }
 
   return text;
 }

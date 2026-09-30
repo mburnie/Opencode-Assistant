@@ -21,7 +21,6 @@ import { getEffectiveTtsConfig } from "../tts/config-resolver.js";
 import { listEdgeVoices } from "../tts/edge.js";
 import { STATIC_VOICES } from "../tts/voices.js";
 import {
-  getCurrentModel,
   getCurrentProject,
   getUiPreferences,
   isTtsEnabled,
@@ -31,8 +30,7 @@ import {
 import type { TtsProvider } from "../config.js";
 import { config } from "../config.js";
 import {
-  buildScheduledTask,
-  getScheduledTaskLimit,
+  buildScheduledTask,  getScheduledTaskLimit,
   TaskBuilderError,
   type BuildSchedule,
   type BuildTaskType,
@@ -60,6 +58,7 @@ import {
   type DocumentName,
 } from "../memory/repositories/documents.js";
 import { appendAudit, getAudit } from "../memory/repositories/audit.js";
+import { buildMemoryContext } from "../memory/injector.js";
 
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "opencode-assistant-memory";
@@ -94,6 +93,21 @@ export const MEMORY_TOOLS = [
         },
       },
       required: ["name"],
+    },
+  },
+  {
+    name: "memory_get_session_context",
+    description:
+      "Return the full Leroy session-start context block (soul, agents, personality, skills, recent facts, session summary) exactly as it would be injected into the first message of a new session. Intended for other front ends (e.g. Cockpit) so they can prepend the same identity/context without duplicating prompt construction.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        channel: {
+          type: "string",
+          enum: ["telegram", "whatsapp", "cockpit"],
+          description: "Messaging channel; may affect channel-specific directives.",
+        },
+      },
     },
   },
   {
@@ -482,6 +496,17 @@ async function executeToolCall(params: ToolCallParams | undefined): Promise<unkn
       return asJsonContent(doc ?? { name, content: "", missing: true });
     }
 
+    case "memory_get_session_context": {
+      const channel =
+        args && typeof args.channel === "string" ? (args.channel as string) : undefined;
+      const options =
+        channel === "telegram" || channel === "whatsapp"
+          ? { channel: channel as "telegram" | "whatsapp" }
+          : undefined;
+      const context = await buildMemoryContext(options);
+      return asJsonContent({ context });
+    }
+
     case "memory_write": {
       const name = requireString(args, "name") as DocumentName;
       if (READ_ONLY_DOCUMENT_NAMES.has(name)) {
@@ -717,14 +742,6 @@ async function executeToolCall(params: ToolCallParams | undefined): Promise<unkn
         );
       }
 
-      const currentModel = getCurrentModel();
-      if (!currentModel) {
-        throw new RpcError(
-          ErrorCode.InvalidParams,
-          "No model selected. Have the user run /model first.",
-        );
-      }
-
       // Enforce the global task limit before doing the (cheap) build.
       const existing = listScheduledTasks();
       if (existing.length >= getScheduledTaskLimit()) {
@@ -745,11 +762,9 @@ async function executeToolCall(params: ToolCallParams | undefined): Promise<unkn
           schedule,
           projectId,
           projectWorktree,
-          model: {
-            providerID: currentModel.providerID,
-            modelID: currentModel.modelID,
-            variant: currentModel.variant ?? null,
-          },
+          // No model override: tasks follow the model of the OpenCode session
+          // they execute against. Leroy keeps no global/owned model.
+          model: null,
           prompt,
           scheduleSummary,
         });

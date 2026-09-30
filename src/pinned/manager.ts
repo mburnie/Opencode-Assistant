@@ -10,7 +10,7 @@ import {
   setPinnedMessageId,
   clearPinnedMessageId,
 } from "../settings/manager.js";
-import { getStoredModel } from "../model/manager.js";
+import { getSessionModelSafe } from "../model/manager.js";
 import { getModelContextLimit } from "../model/context-limit.js";
 import type { FileChange, PinnedMessageState, TokensInfo } from "./types.js";
 import { t } from "../i18n/index.js";
@@ -618,11 +618,20 @@ class PinnedMessageManager {
   }
 
   /**
-   * Fetch context limit from current model configuration
+   * Fetch context limit from the attached session's model.
    */
   private async fetchContextLimit(): Promise<void> {
     try {
-      const model = getStoredModel();
+      const sessionId = this.state.sessionId;
+      const model = sessionId ? await getSessionModelSafe(sessionId) : null;
+
+      if (!model) {
+        this.contextLimit = DEFAULT_CONTEXT_LIMIT;
+        this.state.tokensLimit = this.contextLimit;
+        logger.warn("[PinnedManager] No session model; using default context limit");
+        return;
+      }
+
       this.contextLimit = await getModelContextLimit(model.providerID, model.modelID);
       this.state.tokensLimit = this.contextLimit;
       logger.debug(`[PinnedManager] Context limit: ${this.contextLimit}`);
@@ -636,9 +645,12 @@ class PinnedMessageManager {
   /**
    * Format the pinned message text
    */
-  private formatMessage(): string {
-    const currentModel = getStoredModel();
-    const modelName = formatModelDisplayName(currentModel.providerID, currentModel.modelID);
+  private async formatMessage(): Promise<string> {
+    const sessionId = this.state.sessionId;
+    const currentModel = sessionId ? await getSessionModelSafe(sessionId) : null;
+    const modelName = currentModel
+      ? formatModelDisplayName(currentModel.providerID, currentModel.modelID)
+      : t("pinned.model_none");
     const projectDisplayName = this.state.projectBranch
       ? `${this.state.projectPath}: ${this.state.projectBranch}`
       : this.state.projectPath;
@@ -694,7 +706,7 @@ class PinnedMessageManager {
     }
 
     try {
-      const text = this.formatMessage();
+      const text = await this.formatMessage();
 
       // Send new message
       const sentMessage = await this.api.sendMessage(this.chatId, text);
@@ -753,7 +765,7 @@ class PinnedMessageManager {
         return;
       }
 
-      const text = this.formatMessage();
+      const text = await this.formatMessage();
 
       if (!shouldForceUpdate && text === this.lastRenderedMessageText) {
         logger.debug("[PinnedManager] Skipping pinned update: message content unchanged");

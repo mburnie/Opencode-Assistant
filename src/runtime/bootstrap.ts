@@ -16,13 +16,6 @@ import {
 
 const DEFAULT_API_URL = "http://localhost:4096";
 const DEFAULT_SERVER_USERNAME = "opencode";
-const FALLBACK_MODEL_PROVIDER = "opencode";
-const FALLBACK_MODEL_ID = "big-pickle";
-
-interface ModelDefaults {
-  provider: string;
-  modelId: string;
-}
 
 interface EnvValidationResult {
   isValid: boolean;
@@ -45,8 +38,6 @@ export interface WizardEnvValues {
   OPENCODE_API_URL?: string;
   OPENCODE_SERVER_USERNAME: string;
   OPENCODE_SERVER_PASSWORD?: string;
-  OPENCODE_MODEL_PROVIDER: string;
-  OPENCODE_MODEL_ID: string;
 }
 
 interface ParsedEnvAssignmentLine {
@@ -63,8 +54,6 @@ const WIZARD_ENV_KEYS: ReadonlyArray<keyof WizardEnvValues> = [
   "OPENCODE_API_URL",
   "OPENCODE_SERVER_USERNAME",
   "OPENCODE_SERVER_PASSWORD",
-  "OPENCODE_MODEL_PROVIDER",
-  "OPENCODE_MODEL_ID",
 ];
 
 function isPositiveInteger(value: string): boolean {
@@ -116,13 +105,10 @@ export function validateRuntimeEnvValues(values: Record<string, string>): EnvVal
     };
   }
 
-  if (!values.OPENCODE_MODEL_PROVIDER || values.OPENCODE_MODEL_PROVIDER.trim().length === 0) {
-    return { isValid: false, reason: "Missing OPENCODE_MODEL_PROVIDER" };
-  }
-
-  if (!values.OPENCODE_MODEL_ID || values.OPENCODE_MODEL_ID.trim().length === 0) {
-    return { isValid: false, reason: "Missing OPENCODE_MODEL_ID" };
-  }
+  // OPENCODE_MODEL_PROVIDER / OPENCODE_MODEL_ID are intentionally NOT required.
+  // Leroy has no model of its own — it follows the model of the OpenCode
+  // session it is attached to — so a global model default is not part of
+  // runtime configuration.
 
   const apiUrl = values.OPENCODE_API_URL?.trim();
   if (apiUrl && !isValidHttpUrl(apiUrl)) {
@@ -233,8 +219,6 @@ function buildFlatEnvFileContent(existingContent: string, values: WizardEnvValue
     ["OPENCODE_API_URL", values.OPENCODE_API_URL],
     ["OPENCODE_SERVER_USERNAME", values.OPENCODE_SERVER_USERNAME],
     ["OPENCODE_SERVER_PASSWORD", values.OPENCODE_SERVER_PASSWORD],
-    ["OPENCODE_MODEL_PROVIDER", values.OPENCODE_MODEL_PROVIDER],
-    ["OPENCODE_MODEL_ID", values.OPENCODE_MODEL_ID],
   ];
 
   for (const [key, value] of orderedUpdates) {
@@ -343,40 +327,7 @@ function getEnvExamplePath(): string {
 }
 
 async function loadEnvExampleContent(): Promise<string | null> {
-  try {
-    return await fs.readFile(getEnvExamplePath(), "utf-8");
-  } catch {
-    return null;
-  }
-}
-
-function loadModelDefaultsFromEnvExample(envExampleContent: string | null): ModelDefaults {
-  const fallbackDefaults: ModelDefaults = {
-    provider: FALLBACK_MODEL_PROVIDER,
-    modelId: FALLBACK_MODEL_ID,
-  };
-
-  try {
-    if (!envExampleContent) {
-      return fallbackDefaults;
-    }
-
-    const parsed = dotenv.parse(envExampleContent);
-
-    const provider = parsed.OPENCODE_MODEL_PROVIDER?.trim();
-    const modelId = parsed.OPENCODE_MODEL_ID?.trim();
-
-    if (!provider || !modelId) {
-      return fallbackDefaults;
-    }
-
-    return {
-      provider,
-      modelId,
-    };
-  } catch {
-    return fallbackDefaults;
-  }
+  return fs.readFile(getEnvExamplePath(), "utf-8").catch(() => null);
 }
 
 async function askVisible(question: string): Promise<string> {
@@ -607,11 +558,8 @@ async function runWizardAndPersist(runtimePaths: RuntimePaths): Promise<void> {
     collectWizardValues(),
   ]);
 
-  const modelDefaults = loadModelDefaultsFromEnvExample(envExampleContent);
-  const existingParsed = existingContent ? dotenv.parse(existingContent) : {};
-  const provider = existingParsed.OPENCODE_MODEL_PROVIDER || modelDefaults.provider;
-  const modelId = existingParsed.OPENCODE_MODEL_ID || modelDefaults.modelId;
-
+  // Leroy has no global model default; the wizard does not write
+  // OPENCODE_MODEL_PROVIDER / OPENCODE_MODEL_ID.
   const envValues: WizardEnvValues = {
     BOT_LOCALE: wizardValues.locale,
     TELEGRAM_BOT_TOKEN: wizardValues.token,
@@ -619,8 +567,6 @@ async function runWizardAndPersist(runtimePaths: RuntimePaths): Promise<void> {
     OPENCODE_API_URL: wizardValues.apiUrl,
     OPENCODE_SERVER_USERNAME: wizardValues.serverUsername,
     OPENCODE_SERVER_PASSWORD: wizardValues.serverPassword,
-    OPENCODE_MODEL_PROVIDER: provider,
-    OPENCODE_MODEL_ID: modelId,
   };
 
   const envContent = buildEnvFileContent(existingContent ?? "", envValues, envExampleContent);

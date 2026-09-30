@@ -5,7 +5,7 @@ import { getCurrentSession } from "../../session/manager.js";
 import { getCurrentProject, isTtsEnabled } from "../../settings/manager.js";
 import { fetchCurrentAgent } from "../../agent/manager.js";
 import { getAgentDisplayName } from "../../agent/types.js";
-import { fetchCurrentModel } from "../../model/manager.js";
+import { getSessionModelSafe } from "../../model/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -35,9 +35,14 @@ export async function statusCommand(ctx: CommandContext<Context>) {
       : t("status.agent_not_set");
     message += `${t("status.line.mode", { mode: agentDisplay })}\n`;
 
-    // Add model information
-    const currentModel = fetchCurrentModel();
-    const modelDisplay = `🤖 ${currentModel.providerID}/${currentModel.modelID}`;
+    const currentSession = getCurrentSession();
+
+    // The model must come from the attached session — never from a configured
+    // default. If the session has no resolvable model we say so explicitly.
+    const currentModel = currentSession ? await getSessionModelSafe(currentSession.id) : null;
+    const modelDisplay = currentModel
+      ? `🤖 ${currentModel.providerID}/${currentModel.modelID}`
+      : t("status.model_unknown");
     message += `${t("status.line.model", { model: modelDisplay })}\n`;
 
     const currentProject = getCurrentProject();
@@ -68,7 +73,6 @@ export async function statusCommand(ctx: CommandContext<Context>) {
       message += t("status.project_hint");
     }
 
-    const currentSession = getCurrentSession();
     if (currentSession) {
       message += `\n${t("status.session_selected", { title: currentSession.title })}\n`;
     } else {

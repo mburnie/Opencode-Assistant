@@ -10,6 +10,7 @@ const mocked = vi.hoisted(() => ({
   isTtsEnabledMock: vi.fn(),
   fetchCurrentAgentMock: vi.fn(),
   fetchCurrentModelMock: vi.fn(),
+  getSessionModelSafeMock: vi.fn(),
   getGitWorktreeContextMock: vi.fn(),
 
   pinnedIsInitializedMock: vi.fn(),
@@ -38,7 +39,7 @@ vi.mock("../../../src/agent/manager.js", () => ({
 }));
 
 vi.mock("../../../src/model/manager.js", () => ({
-  fetchCurrentModel: mocked.fetchCurrentModelMock,
+  getSessionModelSafe: mocked.getSessionModelSafeMock,
 }));
 
 vi.mock("../../../src/git/worktree.js", () => ({
@@ -67,6 +68,7 @@ describe("bot/commands/status", () => {
     mocked.isTtsEnabledMock.mockReset();
     mocked.fetchCurrentAgentMock.mockReset();
     mocked.fetchCurrentModelMock.mockReset();
+    mocked.getSessionModelSafeMock.mockReset();
     mocked.getGitWorktreeContextMock.mockReset();
 
     mocked.pinnedIsInitializedMock.mockReset();
@@ -82,6 +84,10 @@ describe("bot/commands/status", () => {
     mocked.isTtsEnabledMock.mockReturnValue(true);
     mocked.fetchCurrentAgentMock.mockResolvedValue("build");
     mocked.fetchCurrentModelMock.mockReturnValue({ providerID: "openai", modelID: "gpt-5" });
+    mocked.getSessionModelSafeMock.mockResolvedValue({
+      providerID: "opencode-go",
+      modelID: "deepseek-v4.1-flash",
+    });
     mocked.getGitWorktreeContextMock.mockResolvedValue(null);
 
     mocked.pinnedIsInitializedMock.mockReturnValue(false);
@@ -133,5 +139,43 @@ describe("bot/commands/status", () => {
     const message = mocked.sendBotTextMock.mock.calls[0]?.[0]?.text as string;
     expect(message).toContain(t("status.project_selected", { project: "/repo-main: feature/mobile" }));
     expect(message).toContain(t("status.worktree_selected", { worktree: "/repo-feature" }));
+  });
+
+  it("shows the actual session model instead of the configured default", async () => {
+    mocked.getSessionModelSafeMock.mockResolvedValue({
+      providerID: "opencode-go",
+      modelID: "deepseek-v4.1-flash",
+    });
+
+    const ctx = {
+      chat: { id: 42, type: "private" },
+      message: { text: "/status" },
+      api: {},
+      reply: vi.fn(),
+    } as unknown as Context;
+
+    await statusCommand(ctx as never);
+
+    const message = mocked.sendBotTextMock.mock.calls[0]?.[0]?.text as string;
+    expect(message).toContain("opencode-go/deepseek-v4.1-flash");
+    expect(message).not.toContain("openai/gpt-5");
+    expect(mocked.fetchCurrentModelMock).not.toHaveBeenCalled();
+  });
+
+  it("reports an unknown model (never a configured default) when the session has no model", async () => {
+    mocked.getSessionModelSafeMock.mockResolvedValue(null);
+
+    const ctx = {
+      chat: { id: 42, type: "private" },
+      message: { text: "/status" },
+      api: {},
+      reply: vi.fn(),
+    } as unknown as Context;
+
+    await statusCommand(ctx as never);
+
+    const message = mocked.sendBotTextMock.mock.calls[0]?.[0]?.text as string;
+    expect(message).toContain(t("status.model_unknown"));
+    expect(message).not.toContain("openai/gpt-5");
   });
 });

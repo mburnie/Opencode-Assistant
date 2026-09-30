@@ -19,6 +19,7 @@ const mocked = vi.hoisted(() => ({
   setBotAndChatIdMock: vi.fn(),
   attachToSessionMock: vi.fn(),
   isFreeModelMock: vi.fn(),
+  requireSessionModelMock: vi.fn(),
 }));
 
 vi.mock("../../../src/opencode/client-v2.js", () => ({
@@ -49,11 +50,7 @@ vi.mock("../../../src/agent/manager.js", () => ({
 }));
 
 vi.mock("../../../src/model/manager.js", () => ({
-  getStoredModel: vi.fn(() => ({
-    providerID: "openai",
-    modelID: "gpt-5",
-    variant: "default",
-  })),
+  requireSessionModel: mocked.requireSessionModelMock,
   isFreeModel: mocked.isFreeModelMock,
 }));
 
@@ -180,6 +177,11 @@ describe("bot/handlers/prompt", () => {
     mocked.attachToSessionMock.mockReset();
     mocked.isFreeModelMock.mockReset();
     mocked.isFreeModelMock.mockResolvedValue(false);
+    mocked.requireSessionModelMock.mockReset();
+    mocked.requireSessionModelMock.mockResolvedValue({
+      providerID: "opencode-go",
+      modelID: "deepseek-v4.1-flash",
+    });
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
       alreadyAttached: false,
@@ -213,7 +215,7 @@ describe("bot/handlers/prompt", () => {
     expect(mocked.suppressionRegisterMock).toHaveBeenCalledWith("session-1", "Review README");
   });
 
-  it("starts prompts through promptAsync instead of the streaming prompt endpoint", async () => {
+  it("resolves the session model, uses it for the free-model check, and sends no model override", async () => {
     const handled = await processUserPrompt(createContext(), "Review README", createDeps());
 
     expect(handled).toBe(true);
@@ -221,17 +223,24 @@ describe("bot/handlers/prompt", () => {
     const backgroundTask = getScheduledBackgroundTask();
     await backgroundTask.task();
 
+    expect(mocked.requireSessionModelMock).toHaveBeenCalledWith("session-1");
     expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith({
       sessionID: "session-1",
       text: "Review README",
       files: [],
       agent: "build",
-      model: {
-        providerID: "openai",
-        modelID: "gpt-5",
-        variant: "default",
-      },
     });
+  });
+
+  it("refuses to send the prompt and reports a clear error when the session model cannot be resolved", async () => {
+    mocked.requireSessionModelMock.mockRejectedValue(new Error("session has no model"));
+
+    const ctx = createContext();
+    const handled = await processUserPrompt(ctx, "Review README", createDeps());
+
+    expect(handled).toBe(false);
+    expect(mocked.sessionPromptAsyncMock).not.toHaveBeenCalled();
+    expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_model_unavailable"));
   });
 
   it("appends the approval-scope instruction when a free model is selected", async () => {
@@ -244,7 +253,7 @@ describe("bot/handlers/prompt", () => {
     const backgroundTask = getScheduledBackgroundTask();
     await backgroundTask.task();
 
-    expect(mocked.isFreeModelMock).toHaveBeenCalledWith("openai", "gpt-5");
+    expect(mocked.isFreeModelMock).toHaveBeenCalledWith("opencode-go", "deepseek-v4.1-flash");
     const [promptArgs] = mocked.sessionPromptAsyncMock.mock.calls[0] as [{
       sessionID: string;
       text: string;

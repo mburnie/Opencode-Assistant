@@ -20,8 +20,10 @@ class PermissionManager {
 
     this.state.requestsByMessageId.set(messageId, request);
 
+    const patterns = Array.isArray(request.patterns) ? request.patterns : [];
+
     logger.info(
-      `[PermissionManager] New permission request: type=${request.permission}, patterns=${request.patterns.join(", ")}, pending=${this.state.requestsByMessageId.size}`,
+      `[PermissionManager] New permission request: type=${request.permission ?? "unknown"}, patterns=${patterns.join(", ")}, pending=${this.state.requestsByMessageId.size}`,
     );
   }
 

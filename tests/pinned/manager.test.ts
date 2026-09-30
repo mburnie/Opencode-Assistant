@@ -6,7 +6,7 @@ const mocked = vi.hoisted(() => ({
   getPinnedMessageId: vi.fn().mockReturnValue(null),
   setPinnedMessageId: vi.fn(),
   clearPinnedMessageId: vi.fn(),
-  getStoredModel: vi.fn().mockReturnValue(null),
+  getSessionModelSafe: vi.fn().mockResolvedValue({ providerID: "openai", modelID: "gpt-5" }),
   getModelContextLimit: vi.fn().mockResolvedValue(204800),
   getGitWorktreeContext: vi.fn(),
 }));
@@ -31,7 +31,7 @@ vi.mock("../../src/settings/manager.js", () => ({
   setPinnedMessageId: mocked.setPinnedMessageId,
   clearPinnedMessageId: mocked.clearPinnedMessageId,
 }));
-vi.mock("../../src/model/manager.js", () => ({ getStoredModel: mocked.getStoredModel }));
+vi.mock("../../src/model/manager.js", () => ({ getSessionModelSafe: mocked.getSessionModelSafe }));
 vi.mock("../../src/model/context-limit.js", () => ({
   getModelContextLimit: mocked.getModelContextLimit,
 }));
@@ -45,6 +45,7 @@ vi.mock("../../src/i18n/index.js", async (importOriginal) => {
       if (key === "pinned.line.project") return `Project: ${params?.project ?? ""}`;
       if (key === "pinned.line.worktree") return `Worktree: ${params?.worktree ?? ""}`;
       if (key === "pinned.line.model") return `Model: ${params?.model ?? ""}`;
+      if (key === "pinned.model_none") return "unknown";
       if (key === "pinned.files.title") return `Files (${params?.count ?? 0}):`;
       if (key === "pinned.files.item") return `  ${params?.path ?? ""}${params?.diff ?? ""}`;
       if (key === "pinned.files.more") return `  ... and ${params?.count ?? 0} more`;
@@ -83,7 +84,7 @@ describe("pinned/manager", () => {
 
     mocked.getCurrentSession.mockReturnValue({ id: "ses-1", title: "Test Session" });
     mocked.getCurrentProject.mockReturnValue({ id: "p1", worktree: "D:/repo", name: "repo" });
-    mocked.getStoredModel.mockReturnValue({ providerID: "openai", modelID: "gpt-5" });
+    mocked.getSessionModelSafe.mockResolvedValue({ providerID: "openai", modelID: "gpt-5" });
     mocked.getModelContextLimit.mockResolvedValue(204800);
     mocked.getPinnedMessageId.mockReturnValue(null);
     mocked.getGitWorktreeContext.mockResolvedValue({

@@ -205,7 +205,10 @@ export class ScheduledTaskRuntime {
     const now = new Date();
     let hasChanges = false;
     const normalizedTasks = tasks.map((task) => {
-      const normalizedTask: ScheduledTask = { ...task, model: { ...task.model } };
+      const normalizedTask: ScheduledTask = {
+        ...task,
+        model: task.model ? { ...task.model } : null,
+      };
 
       if (normalizedTask.lastStatus === "running") {
         normalizedTask.lastStatus = "error";

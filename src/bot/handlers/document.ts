@@ -12,7 +12,8 @@ import {
   supportsInput,
   type ModelCapabilities,
 } from "../../model/capabilities.js";
-import { getStoredModel } from "../../model/manager.js";
+import { fetchSessionModel } from "../../model/manager.js";
+import { getCurrentSession } from "../../session/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import type { LegacyFilePart } from "../../opencode/client-v2.js";
@@ -26,7 +27,10 @@ export interface DocumentHandlerDeps extends ProcessPromptDeps {
     providerId: string,
     modelId: string,
   ) => Promise<ModelCapabilities | null>;
-  getStoredModel?: () => { providerID: string; modelID: string };
+  getCurrentSessionID?: () => string | null;
+  getSessionModel?: (
+    sessionID: string,
+  ) => Promise<{ providerID: string; modelID: string } | null>;
   processPrompt?: (
     ctx: Context,
     text: string,
@@ -41,7 +45,8 @@ export async function handleDocumentMessage(
 ): Promise<void> {
   const downloadFile = deps.downloadFile ?? downloadTelegramFile;
   const getCapabilities = deps.getModelCapabilities ?? getModelCapabilities;
-  const getStored = deps.getStoredModel ?? getStoredModel;
+  const getSessionModel = deps.getSessionModel ?? fetchSessionModel;
+  const getSessionID = deps.getCurrentSessionID ?? (() => getCurrentSession()?.id ?? null);
   const processPrompt = deps.processPrompt ?? processUserPrompt;
 
   const doc = ctx.message?.document;
@@ -81,12 +86,22 @@ export async function handleDocumentMessage(
     }
 
     if (mimeType === "application/pdf") {
-      const storedModel = getStored();
-      const capabilities = await getCapabilities(storedModel.providerID, storedModel.modelID);
+      const sessionID = getSessionID();
+      const sessionModel = sessionID ? await getSessionModel(sessionID) : null;
+
+      if (!sessionModel) {
+        logger.error(
+          "[Document] Cannot determine the attached session model for PDF capability check",
+        );
+        await ctx.reply(t("bot.session_model_unavailable"));
+        return;
+      }
+
+      const capabilities = await getCapabilities(sessionModel.providerID, sessionModel.modelID);
 
       if (!supportsInput(capabilities, "pdf")) {
         logger.warn(
-          `[Document] Model ${storedModel.providerID}/${storedModel.modelID} doesn't support PDF input`,
+          `[Document] Model ${sessionModel.providerID}/${sessionModel.modelID} doesn't support PDF input`,
         );
         await ctx.reply(t("bot.model_no_pdf"));
 

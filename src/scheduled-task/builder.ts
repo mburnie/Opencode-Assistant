@@ -37,7 +37,8 @@ export interface BuildTaskInput {
   schedule: BuildSchedule;
   projectId: string;
   projectWorktree: string;
-  model: ScheduledTaskModel;
+  /** Optional per-task model override; when omitted the task follows the session model. */
+  model?: ScheduledTaskModel | null;
   /** Required for type=task and type=reminder; ignored for type=backup. */
   prompt?: string;
   /** When given, used as a custom human-readable label in `/tasklist`. */
@@ -118,8 +119,8 @@ export function buildScheduledTask(input: BuildTaskInput): ScheduledTask {
   if (!input.projectId || !input.projectWorktree) {
     throw new TaskBuilderError("projectId and projectWorktree are required");
   }
-  if (!input.model.providerID || !input.model.modelID) {
-    throw new TaskBuilderError("model.providerID and model.modelID are required");
+  if (input.model && (!input.model.providerID || !input.model.modelID)) {
+    throw new TaskBuilderError("model.providerID and model.modelID are required when a model override is provided");
   }
   if ((input.type === "task" || input.type === "reminder") && !input.prompt?.trim()) {
     throw new TaskBuilderError(`prompt is required for type=${input.type}`);
@@ -152,7 +153,7 @@ export function buildScheduledTask(input: BuildTaskInput): ScheduledTask {
     type: input.type,
     projectId: input.projectId,
     projectWorktree: input.projectWorktree,
-    model: input.model,
+    model: input.model ?? null,
     scheduleText: summary,
     scheduleSummary: summary,
     timezone,

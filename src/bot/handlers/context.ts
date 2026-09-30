@@ -1,7 +1,7 @@
 import { Context, InlineKeyboard } from "grammy";
 import { getCurrentSession } from "../../session/manager.js";
 import { compactSession } from "../../opencode/client-v2.js";
-import { getStoredModel } from "../../model/manager.js";
+import { getSessionModelSafe } from "../../model/manager.js";
 import {
   clearActiveInlineMenu,
   ensureActiveInlineMenu,
@@ -88,10 +88,11 @@ export async function handleCompactConfirm(ctx: Context): Promise<boolean> {
     // Show typing indicator
     await ctx.api.sendChatAction(ctx.chat!.id, "typing");
 
-    const storedModel = getStoredModel();
+    const sessionModel = await getSessionModelSafe(session.id);
 
     logger.debug(
-      `[ContextHandler] Calling summarize with sessionID=${session.id}, directory=${session.directory}, model=${storedModel.providerID}/${storedModel.modelID}`,
+      `[ContextHandler] Calling summarize with sessionID=${session.id}, directory=${session.directory}, ` +
+        `model=${sessionModel ? `${sessionModel.providerID}/${sessionModel.modelID}` : "unknown"}`,
     );
 
     // Mark session as compacting so onPartial/onComplete skip the summary text

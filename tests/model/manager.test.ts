@@ -4,70 +4,27 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
-  configMock,
   providersMock,
-  getCurrentModelMock,
-  setCurrentModelMock,
-  setCurrentModelState,
-  getCurrentModelState,
-  resetCurrentModelState,
+  getSessionMock,
+  switchSessionModelMock,
   loggerInfoMock,
   loggerWarnMock,
   loggerErrorMock,
   loggerDebugMock,
-} = vi.hoisted(() => {
-  let currentModel: { providerID: string; modelID: string; variant?: string } | undefined;
-
-  const getCurrentModelMock = vi.fn(() => currentModel);
-  const setCurrentModelMock = vi.fn(
-    (modelInfo: { providerID: string; modelID: string; variant?: string }) => {
-      currentModel = modelInfo;
-    },
-  );
-
-  return {
-    configMock: {
-      opencode: {
-        model: {
-          provider: "opencode",
-          modelId: "big-pickle",
-        },
-      },
-    },
-    providersMock: vi.fn(),
-    getCurrentModelMock,
-    setCurrentModelMock,
-    setCurrentModelState: (modelInfo?: {
-      providerID: string;
-      modelID: string;
-      variant?: string;
-    }) => {
-      currentModel = modelInfo;
-    },
-    getCurrentModelState: () => currentModel,
-    resetCurrentModelState: () => {
-      currentModel = undefined;
-      getCurrentModelMock.mockClear();
-      setCurrentModelMock.mockClear();
-    },
-    loggerInfoMock: vi.fn(),
-    loggerWarnMock: vi.fn(),
-    loggerErrorMock: vi.fn(),
-    loggerDebugMock: vi.fn(),
-  };
-});
-
-vi.mock("../../src/config.js", () => ({
-  config: configMock,
+} = vi.hoisted(() => ({
+  providersMock: vi.fn(),
+  getSessionMock: vi.fn(),
+  switchSessionModelMock: vi.fn(),
+  loggerInfoMock: vi.fn(),
+  loggerWarnMock: vi.fn(),
+  loggerErrorMock: vi.fn(),
+  loggerDebugMock: vi.fn(),
 }));
 
 vi.mock("../../src/opencode/client-v2.js", () => ({
   listProvidersWithModels: providersMock,
-}));
-
-vi.mock("../../src/settings/manager.js", () => ({
-  getCurrentModel: getCurrentModelMock,
-  setCurrentModel: setCurrentModelMock,
+  getSession: getSessionMock,
+  switchSessionModel: switchSessionModelMock,
 }));
 
 vi.mock("../../src/utils/logger.js", () => ({
@@ -82,10 +39,13 @@ vi.mock("../../src/utils/logger.js", () => ({
 import {
   __resetFreeModelCacheForTests,
   __resetModelCatalogCacheForTests,
+  fetchSessionModel,
   getFavoriteModels,
   getModelSelectionLists,
   isFreeModel,
-  reconcileStoredModelSelection,
+  requireSessionModel,
+  SessionModelUnavailableError,
+  setSessionModel,
 } from "../../src/model/manager.js";
 
 function createProvidersResponse(modelsByProvider: Record<string, string[]>) {
@@ -112,7 +72,6 @@ describe("model/manager", () => {
     originalHome = process.env.HOME;
 
     vi.useRealTimers();
-    resetCurrentModelState();
     __resetModelCatalogCacheForTests();
     __resetFreeModelCacheForTests();
 
@@ -120,6 +79,11 @@ describe("model/manager", () => {
     loggerWarnMock.mockReset();
     loggerErrorMock.mockReset();
     loggerDebugMock.mockReset();
+
+    getSessionMock.mockReset();
+    switchSessionModelMock.mockReset();
+    getSessionMock.mockResolvedValue({ data: { id: "s1" }, error: null });
+    switchSessionModelMock.mockResolvedValue({ error: null });
 
     providersMock.mockReset();
     providersMock.mockResolvedValue(
@@ -168,13 +132,12 @@ describe("model/manager", () => {
 
       const result = await getModelSelectionLists();
 
-      expect(result.favorites).toHaveLength(3); // 2 from file + 1 default
+      expect(result.favorites).toHaveLength(2); // 2 from file, no config default
       expect(result.favorites).toContainEqual({ providerID: "openai", modelID: "gpt-4o" });
       expect(result.favorites).toContainEqual({
         providerID: "anthropic",
         modelID: "claude-sonnet",
       });
-      expect(result.favorites).toContainEqual({ providerID: "opencode", modelID: "big-pickle" });
 
       expect(result.recent).toHaveLength(2);
       expect(result.recent).toContainEqual({ providerID: "google", modelID: "gemini-pro" });
@@ -193,7 +156,7 @@ describe("model/manager", () => {
 
       const result = await getModelSelectionLists();
 
-      expect(result.favorites).toHaveLength(3); // 2 unique from file + 1 default
+      expect(result.favorites).toHaveLength(2); // 2 unique from file, no config default
       const openaiGpt4oCount = result.favorites.filter(
         (m) => m.providerID === "openai" && m.modelID === "gpt-4o",
       ).length;
@@ -219,32 +182,15 @@ describe("model/manager", () => {
       expect(result.recent).toContainEqual({ providerID: "google", modelID: "gemini-pro" });
     });
 
-    it("falls back to config model when model.json does not exist", async () => {
+    it("returns empty favorites when model.json does not exist", async () => {
       // Set XDG_STATE_HOME to a non-existent directory
       tempDir = await mkdtemp(path.join(os.tmpdir(), "opencode-model-test-"));
       process.env.XDG_STATE_HOME = path.join(tempDir, "nonexistent");
 
       const result = await getModelSelectionLists();
 
-      expect(result.favorites).toHaveLength(1);
-      expect(result.favorites[0]).toEqual({ providerID: "opencode", modelID: "big-pickle" });
-      expect(result.recent).toHaveLength(0);
-    });
-
-    it("returns empty lists when file does not exist and no config model", async () => {
-      tempDir = await mkdtemp(path.join(os.tmpdir(), "opencode-model-test-"));
-      process.env.XDG_STATE_HOME = path.join(tempDir, "nonexistent");
-      configMock.opencode.model.provider = "";
-      configMock.opencode.model.modelId = "";
-
-      const result = await getModelSelectionLists();
-
       expect(result.favorites).toHaveLength(0);
       expect(result.recent).toHaveLength(0);
-
-      // Restore config
-      configMock.opencode.model.provider = "opencode";
-      configMock.opencode.model.modelId = "big-pickle";
     });
 
     it("handles missing recent array gracefully", async () => {
@@ -255,7 +201,7 @@ describe("model/manager", () => {
 
       const result = await getModelSelectionLists();
 
-      expect(result.favorites).toHaveLength(2); // 1 from file + 1 default
+      expect(result.favorites).toHaveLength(1); // 1 from file, no config default
       expect(result.recent).toHaveLength(0);
     });
 
@@ -267,7 +213,7 @@ describe("model/manager", () => {
 
       const result = await getModelSelectionLists();
 
-      expect(result.favorites).toHaveLength(1); // just default
+      expect(result.favorites).toHaveLength(0);
       expect(result.recent).toHaveLength(1);
       expect(result.recent[0]).toEqual({ providerID: "openai", modelID: "gpt-4o" });
     });
@@ -284,9 +230,8 @@ describe("model/manager", () => {
 
       const result = await getModelSelectionLists();
 
-      expect(result.favorites).toHaveLength(2); // 1 valid from file + 1 default
+      expect(result.favorites).toHaveLength(1); // 1 valid from file
       expect(result.favorites).toContainEqual({ providerID: "openai", modelID: "gpt-4o" });
-      expect(result.favorites).toContainEqual({ providerID: "opencode", modelID: "big-pickle" });
     });
 
     it("filters out invalid model entries with missing modelID", async () => {
@@ -301,27 +246,8 @@ describe("model/manager", () => {
 
       const result = await getModelSelectionLists();
 
-      expect(result.favorites).toHaveLength(2); // 1 valid from file + 1 default
+      expect(result.favorites).toHaveLength(1); // 1 valid from file
       expect(result.favorites).toContainEqual({ providerID: "openai", modelID: "gpt-4o" });
-    });
-
-    it("deduplicates default config model when already in favorites", async () => {
-      // configMock has opencode/big-pickle as default
-      await setupMockModelFile({
-        favorite: [
-          { providerID: "opencode", modelID: "big-pickle" }, // same as default
-          { providerID: "openai", modelID: "gpt-4o" },
-        ],
-        recent: [],
-      });
-
-      const result = await getModelSelectionLists();
-
-      expect(result.favorites).toHaveLength(2); // should not duplicate the default
-      const opencodeBigPickleCount = result.favorites.filter(
-        (m) => m.providerID === "opencode" && m.modelID === "big-pickle",
-      ).length;
-      expect(opencodeBigPickleCount).toBe(1);
     });
 
     it("deduplicates recent models", async () => {
@@ -356,7 +282,6 @@ describe("model/manager", () => {
       const result = await getModelSelectionLists();
 
       expect(result.favorites).toContainEqual({ providerID: "openai", modelID: "gpt-4o" });
-      expect(result.favorites).toContainEqual({ providerID: "opencode", modelID: "big-pickle" });
       expect(result.favorites).not.toContainEqual({
         providerID: "openai",
         modelID: "missing-favorite",
@@ -418,39 +343,73 @@ describe("model/manager", () => {
 
       const favorites = await getFavoriteModels();
 
-      expect(favorites).toHaveLength(2); // 1 from file + 1 default
+      expect(favorites).toHaveLength(1); // 1 from file, no config default
       expect(favorites).toContainEqual({ providerID: "openai", modelID: "gpt-4o" });
-      expect(favorites).toContainEqual({ providerID: "opencode", modelID: "big-pickle" });
       // recent models should not be in favorites
       expect(favorites).not.toContainEqual({ providerID: "google", modelID: "gemini-pro" });
     });
   });
 
-  describe("reconcileStoredModelSelection", () => {
-    it("falls back to env default when stored model is unavailable", async () => {
-      setCurrentModelState({ providerID: "openai", modelID: "retired", variant: "high" });
+  describe("fetchSessionModel / requireSessionModel", () => {
+    it("returns the session's model when present", async () => {
+      getSessionMock.mockResolvedValue({
+        data: {
+          id: "s1",
+          model: { providerID: "opencode-go", modelID: "deepseek-v4.1-flash", variant: "default" },
+        },
+        error: null,
+      });
 
-      await reconcileStoredModelSelection();
-
-      expect(getCurrentModelState()).toEqual({
-        providerID: "opencode",
-        modelID: "big-pickle",
+      expect(await fetchSessionModel("s1")).toEqual({
+        providerID: "opencode-go",
+        modelID: "deepseek-v4.1-flash",
         variant: "default",
       });
-      expect(setCurrentModelMock).toHaveBeenCalledTimes(1);
     });
 
-    it("keeps stored model when it is available", async () => {
-      setCurrentModelState({ providerID: "openai", modelID: "gpt-4o", variant: "high" });
+    it("returns null when the session has no model", async () => {
+      getSessionMock.mockResolvedValue({ data: { id: "s1" }, error: null });
+      expect(await fetchSessionModel("s1")).toBeNull();
+    });
 
-      await reconcileStoredModelSelection();
+    it("returns null when the session request fails", async () => {
+      getSessionMock.mockResolvedValue({ error: new Error("not found") });
+      expect(await fetchSessionModel("s1")).toBeNull();
+    });
 
-      expect(getCurrentModelState()).toEqual({
-        providerID: "openai",
-        modelID: "gpt-4o",
-        variant: "high",
+    it("requireSessionModel throws a clear error instead of falling back", async () => {
+      getSessionMock.mockResolvedValue({ data: { id: "s1" }, error: null });
+      await expect(requireSessionModel("s1")).rejects.toBeInstanceOf(
+        SessionModelUnavailableError,
+      );
+    });
+
+    it("requireSessionModel returns the model when resolvable", async () => {
+      getSessionMock.mockResolvedValue({
+        data: { id: "s1", model: { providerID: "opencode", modelID: "big-pickle" } },
+        error: null,
       });
-      expect(setCurrentModelMock).not.toHaveBeenCalled();
+      await expect(requireSessionModel("s1")).resolves.toEqual({
+        providerID: "opencode",
+        modelID: "big-pickle",
+        variant: undefined,
+      });
+    });
+  });
+
+  describe("setSessionModel", () => {
+    it("switches the model on the OpenCode session", async () => {
+      await setSessionModel("s1", {
+        providerID: "openai",
+        modelID: "gpt-5",
+        variant: "default",
+      });
+
+      expect(switchSessionModelMock).toHaveBeenCalledWith("s1", {
+        providerID: "openai",
+        modelID: "gpt-5",
+        variant: "default",
+      });
     });
   });
 

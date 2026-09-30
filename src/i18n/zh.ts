@@ -92,6 +92,8 @@ export const zh: I18nDictionary = {
   "bot.file_download_error": "🔴 下载文件失败",
   "bot.model_no_pdf": "⚠️ 当前模型不支持PDF输入。将仅发送文本。",
   "bot.text_file_too_large": "⚠️ 文本文件过大（最大 {maxSizeKb}KB）",
+  "bot.session_model_unavailable":
+    "🔴 无法确定所连接 OpenCode 会话的模型。Leroy 跟随会话的模型且没有自己的模型，因此请求未发送。请在 OpenCode（或通过 /model）为该会话选择模型后重试。",
 
   "status.header_running": "🟢 OpenCode 服务器正在运行",
   "status.health.healthy": "健康",
@@ -104,6 +106,7 @@ export const zh: I18nDictionary = {
   "status.line.uptime_sec": "运行时间：{seconds} 秒",
   "status.line.mode": "Agent：{mode}",
   "status.line.model": "模型：{model}",
+  "status.model_unknown": "未知（无会话模型）",
   "status.line.tts": "TTS 回复：{tts}",
   "status.tts.on": "开启",
   "status.tts.off": "关闭",
@@ -267,6 +270,8 @@ export const zh: I18nDictionary = {
 
   "model.changed_callback": "模型已更改：{name}",
   "model.changed_message": "✅ 模型已切换为：{name}",
+  "model.no_session":
+    "⚠️ 没有活动会话。请先打开或创建一个会话，然后选择模型 —— 模型会直接应用到该会话。",
   "model.change_error_callback": "切换模型失败",
   "model.menu.empty": "⚠️ 没有可用模型",
   "model.menu.select": "请选择模型：",
@@ -344,6 +349,8 @@ export const zh: I18nDictionary = {
   "permission.name.task": "任务",
   "permission.name.lsp": "LSP",
   "permission.name.external_directory": "外部目录",
+  "permission.name.generic": "工具权限请求",
+  "permission.name.generic_tool": "工具权限请求：{tool}",
 
   "question.inactive_callback": "投票已失效",
   "question.processing_error_callback": "处理错误",
@@ -411,6 +418,7 @@ export const zh: I18nDictionary = {
   "pinned.line.project": "项目: {project}",
   "pinned.line.worktree": "Worktree: {worktree}",
   "pinned.line.model": "模型: {model}",
+  "pinned.model_none": "未知",
   "pinned.line.attach": "Tracking: {status}",
   "pinned.attach.status.idle": "active, idle",
   "pinned.attach.status.busy": "active, busy",
@@ -485,6 +493,7 @@ export const zh: I18nDictionary = {
   "task.created":
     "✅ 定时任务已创建\n\n任务：{description}\n项目：{project}\n模型：{model}\n时间安排：{schedule}\n{cronLine}下次运行：{nextRunAt}",
   "task.created.cron": "Cron: {cron}",
+  "task.model_follows_session": "会话模型（跟随 OpenCode 会话）",
   "task.button.retry_schedule": "🔁 重新输入时间安排",
   "task.button.cancel": "❌ 取消",
   "task.retry_schedule_callback": "正在重新输入时间安排...",
@@ -568,7 +577,7 @@ export const zh: I18nDictionary = {
   "legacy.models.empty": "📋 没有可用模型。请在 OpenCode 中配置 providers。",
   "legacy.models.header": "📋 可用模型：\n\n",
   "legacy.models.no_provider_models": "  ⚠️ 没有可用模型\n",
-  "legacy.models.env_hint": "💡 在 .env 中使用该模型：\n",
+  "legacy.models.session_hint": "💡 在 .env 中使用该模型：\n",
   "legacy.models.error": "🔴 加载模型列表时发生错误。",
 
   "stt.recognizing": "🎤 正在识别音频...",

@@ -3,7 +3,7 @@ import { getCurrentSession } from "../../session/manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { fetchCurrentAgent } from "../../agent/manager.js";
 import { getAgentDisplayName } from "../../agent/types.js";
-import { fetchCurrentModel } from "../../model/manager.js";
+import { getSessionModelSafe } from "../../model/manager.js";
 import { logger } from "../../utils/logger.js";
 import type { WhatsAppCommandHandler } from "./types.js";
 
@@ -33,9 +33,12 @@ export const statusCommand: WhatsAppCommandHandler = async (ctx) => {
       logger.debug("[WhatsApp][status] agent fetch failed", err);
     }
 
+    const session = getCurrentSession("whatsapp");
+
     try {
-      const model = fetchCurrentModel();
-      lines.push(`Model: ${model.providerID}/${model.modelID}`);
+      // Model must reflect the attached session; never a configured default.
+      const model = session ? await getSessionModelSafe(session.id) : null;
+      lines.push(`Model: ${model ? `${model.providerID}/${model.modelID}` : "unknown (no session model)"}`);
     } catch (err) {
       logger.debug("[WhatsApp][status] model fetch failed", err);
     }
@@ -47,7 +50,6 @@ export const statusCommand: WhatsAppCommandHandler = async (ctx) => {
       lines.push("Project: _not selected_");
     }
 
-    const session = getCurrentSession("whatsapp");
     if (session) {
       lines.push(`Session: ${session.title}`);
     } else {

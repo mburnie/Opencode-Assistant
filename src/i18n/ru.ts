@@ -101,6 +101,8 @@ export const ru: I18nDictionary = {
   "bot.file_download_error": "🔴 Не удалось скачать файл",
   "bot.model_no_pdf": "⚠️ Текущая модель не поддерживает PDF. Отправляю только текст.",
   "bot.text_file_too_large": "⚠️ Текстовый файл слишком большой (макс. {maxSizeKb}КБ)",
+  "bot.session_model_unavailable":
+    "🔴 Не удалось определить модель привязанной сессии OpenCode. Leroy следует модели сессии и не имеет собственной модели, поэтому запрос не отправлен. Выберите модель для сессии в OpenCode (или через /model) и повторите.",
 
   "status.header_running": "🟢 OpenCode Server запущен",
   "status.health.healthy": "Healthy",
@@ -113,6 +115,7 @@ export const ru: I18nDictionary = {
   "status.line.uptime_sec": "Uptime: {seconds} сек",
   "status.line.mode": "Агент: {mode}",
   "status.line.model": "Модель: {model}",
+  "status.model_unknown": "неизвестно (нет модели сессии)",
   "status.line.tts": "TTS-ответы: {tts}",
   "status.tts.on": "Вкл",
   "status.tts.off": "Выкл",
@@ -302,6 +305,8 @@ export const ru: I18nDictionary = {
 
   "model.changed_callback": "Модель изменена: {name}",
   "model.changed_message": "✅ Модель изменена на: {name}",
+  "model.no_session":
+    "⚠️ Нет активной сессии. Сначала откройте или создайте сессию, затем выберите модель — модель меняется в самой сессии.",
   "model.change_error_callback": "Ошибка при смене модели",
   "model.menu.empty": "⚠️ Нет доступных моделей",
   "model.menu.select": "Выберите модель:",
@@ -381,6 +386,8 @@ export const ru: I18nDictionary = {
   "permission.name.task": "Task",
   "permission.name.lsp": "LSP",
   "permission.name.external_directory": "Внешняя директория",
+  "permission.name.generic": "Запрос разрешения инструмента",
+  "permission.name.generic_tool": "Запрос разрешения инструмента: {tool}",
 
   "question.inactive_callback": "Опрос неактивен",
   "question.processing_error_callback": "Ошибка при обработке",
@@ -449,6 +456,7 @@ export const ru: I18nDictionary = {
   "pinned.line.project": "Проект: {project}",
   "pinned.line.worktree": "Worktree: {worktree}",
   "pinned.line.model": "Модель: {model}",
+  "pinned.model_none": "неизвестно",
   "pinned.line.attach": "Tracking: {status}",
   "pinned.attach.status.idle": "активен, idle",
   "pinned.attach.status.busy": "активен, busy",
@@ -530,6 +538,7 @@ export const ru: I18nDictionary = {
   "task.created":
     "✅ Задача по расписанию создана\n\nЗадача: {description}\nПроект: {project}\nМодель: {model}\nРасписание: {schedule}\n{cronLine}Следующий запуск: {nextRunAt}",
   "task.created.cron": "Cron: {cron}",
+  "task.model_follows_session": "модель сессии (следует за сессией OpenCode)",
   "task.button.retry_schedule": "🔁 Ввести период заново",
   "task.button.cancel": "❌ Отмена",
   "task.retry_schedule_callback": "Возвращаю ввод периода...",
@@ -622,7 +631,7 @@ export const ru: I18nDictionary = {
   "legacy.models.empty": "📋 Нет доступных моделей. Настройте провайдеры через OpenCode.",
   "legacy.models.header": "📋 Доступные модели:\n\n",
   "legacy.models.no_provider_models": "  ⚠️ Нет доступных моделей\n",
-  "legacy.models.env_hint": "💡 Для использования модели в .env:\n",
+  "legacy.models.session_hint": "💡 Для использования модели в .env:\n",
   "legacy.models.error": "🔴 Произошла ошибка при получении списка моделей.",
 
   "stt.recognizing": "🎤 Распознаю аудио...",

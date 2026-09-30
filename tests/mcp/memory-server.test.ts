@@ -518,17 +518,12 @@ describe("mcp/memory-server", () => {
 
   describe("task tools", () => {
     beforeEach(async () => {
-      // Tasks need a current project + model; install them via the
-      // settings manager (the MCP tool reads getCurrentProject/Model).
+      // Tasks need a current project. No model is required: scheduled tasks
+      // follow the OpenCode session model (Leroy keeps no model of its own).
       const settings = await import("../../src/settings/manager.js");
       settings.setCurrentProject({
         id: "proj-test",
         worktree: "D:/Projects/Test",
-      });
-      settings.setCurrentModel({
-        providerID: "test-provider",
-        modelID: "test-model",
-        variant: undefined,
       });
     });
 

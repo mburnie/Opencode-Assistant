@@ -1,11 +1,10 @@
 import { Context, InlineKeyboard } from "grammy";
 import {
   getAvailableVariants,
-  getCurrentVariant,
-  setCurrentVariant,
   formatVariantForDisplay,
 } from "../../variant/manager.js";
-import { getStoredModel } from "../../model/manager.js";
+import { getSessionModelSafe } from "../../model/manager.js";
+import { getCurrentSession } from "../../session/manager.js";
 import { logger } from "../../utils/logger.js";
 import {
   clearActiveInlineMenu,
@@ -34,18 +33,18 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
   logger.debug(`[VariantHandler] Received callback: ${callbackQuery.data}`);
 
   try {
-    const variantId = callbackQuery.data.replace("variant:", "");
+    // Variants (reasoning modes) are owned by the OpenCode session's model.
+    // Leroy keeps no per-model variant setting, so selection here is a no-op.
+    const session = getCurrentSession();
+    const currentModel = session ? await getSessionModelSafe(session.id) : null;
 
-    const currentModel = getStoredModel();
-
-    if (!currentModel.providerID || !currentModel.modelID) {
-      logger.error("[VariantHandler] No model selected");
+    if (!currentModel) {
+      logger.error("[VariantHandler] No session model available");
       await ctx.answerCallbackQuery({ text: t("variant.model_not_selected_callback") });
       return false;
     }
 
-    setCurrentVariant(variantId);
-
+    const variantId = callbackQuery.data.replace("variant:", "");
     const displayName = formatVariantForDisplay(variantId);
 
     clearActiveInlineMenu("variant_selected");
@@ -112,14 +111,15 @@ export async function buildVariantSelectionMenu(
  */
 export async function showVariantSelectionMenu(ctx: Context): Promise<void> {
   try {
-    const currentModel = getStoredModel();
+    const session = getCurrentSession();
+    const currentModel = session ? await getSessionModelSafe(session.id) : null;
 
-    if (!currentModel.providerID || !currentModel.modelID) {
+    if (!currentModel) {
       await ctx.reply(t("variant.select_model_first"));
       return;
     }
 
-    const currentVariant = getCurrentVariant();
+    const currentVariant = currentModel.variant || "default";
     const keyboard = await buildVariantSelectionMenu(
       currentVariant,
       currentModel.providerID,

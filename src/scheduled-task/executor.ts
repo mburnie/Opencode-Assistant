@@ -249,14 +249,13 @@ export async function executeScheduledTask(
       channel: "telegram",
     });
 
-    const promptModel =
-      task.model.providerID && task.model.modelID
-        ? {
-            providerID: task.model.providerID,
-            modelID: task.model.modelID,
-            variant: task.model.variant ?? undefined,
-          }
-        : undefined;
+    const promptModel = task.model
+      ? {
+          providerID: task.model.providerID,
+          modelID: task.model.modelID,
+          variant: task.model.variant ?? undefined,
+        }
+      : undefined;
 
     const { error: promptError } = await promptSession({
       sessionID: session.id,

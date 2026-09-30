@@ -17,7 +17,7 @@ import { interactionManager } from "../../interaction/manager.js";
 import type { InteractionState } from "../../interaction/types.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
-import { getStoredModel } from "../../model/manager.js";
+import { requireSessionModel } from "../../model/manager.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -441,15 +441,27 @@ async function executeCommand(
   }
 
   const currentAgent = await resolveProjectAgent(getStoredAgent());
-  const storedModel = getStoredModel();
+
+  // Leroy follows the session model; no override is sent for slash-commands.
+  let effectiveModel;
+  try {
+    effectiveModel = await requireSessionModel(session.id);
+  } catch (modelError) {
+    logger.error(
+      `[Commands] Cannot resolve model for session ${session.id}; refusing to run /${params.commandName}`,
+      modelError,
+    );
+    await ctx.reply(t("bot.session_model_unavailable"));
+    return;
+  }
 
   foregroundSessionState.markBusy(session.id);
   await markAttachedSessionBusy(session.id);
   assistantRunState.startRun(session.id, {
     startedAt: Date.now(),
     configuredAgent: currentAgent,
-    configuredProviderID: storedModel.providerID,
-    configuredModelID: storedModel.modelID,
+    configuredProviderID: effectiveModel.providerID,
+    configuredModelID: effectiveModel.modelID,
   });
   externalUserInputSuppressionManager.register(
     session.id,
@@ -464,14 +476,6 @@ async function executeCommand(
         name: params.commandName,
         text: args,
         agent: currentAgent,
-        model:
-          storedModel.providerID && storedModel.modelID
-            ? {
-                providerID: storedModel.providerID,
-                modelID: storedModel.modelID,
-                variant: storedModel.variant,
-              }
-            : undefined,
       }),
     onSuccess: ({ error }) => {
       if (error) {

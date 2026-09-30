@@ -33,8 +33,7 @@ export async function modelsCommand(ctx: CommandContext<Context>) {
       message += "\n";
     }
 
-    message += t("legacy.models.env_hint");
-    message += "OPENCODE_MODEL_PROVIDER=<provider.id>\nOPENCODE_MODEL_ID=<model.id>";
+    message += t("legacy.models.session_hint");
 
     await ctx.reply(message);
   } catch (error) {

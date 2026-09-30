@@ -37,6 +37,7 @@ const mocked = vi.hoisted(() => ({
   safeBackgroundTaskMock: vi.fn(),
   suppressionRegisterMock: vi.fn(),
   attachToSessionMock: vi.fn(),
+  requireSessionModelMock: vi.fn(),
 }));
 
 vi.mock("../../../src/settings/manager.js", () => ({
@@ -81,11 +82,7 @@ vi.mock("../../../src/agent/manager.js", () => ({
 }));
 
 vi.mock("../../../src/model/manager.js", () => ({
-  getStoredModel: vi.fn(() => ({
-    providerID: "openai",
-    modelID: "gpt-5",
-    variant: "default",
-  })),
+  requireSessionModel: mocked.requireSessionModelMock,
 }));
 
 vi.mock("../../../src/utils/safe-background-task.js", () => ({
@@ -216,6 +213,11 @@ describe("bot/commands/commands", () => {
       restoredForm: false,
       restoredPermissions: 0,
     });
+    mocked.requireSessionModelMock.mockReset();
+    mocked.requireSessionModelMock.mockResolvedValue({
+      providerID: "opencode-go",
+      modelID: "deepseek-v4.1-flash",
+    });
 
     mocked.sessionStatusMock.mockResolvedValue({
       data: {
@@ -331,11 +333,6 @@ describe("bot/commands/commands", () => {
       name: "poem",
       text: "",
       agent: "build",
-      model: {
-        providerID: "openai",
-        modelID: "gpt-5",
-        variant: "default",
-      },
     });
   });
 
@@ -374,11 +371,6 @@ describe("bot/commands/commands", () => {
       name: "poem",
       text: "about spring",
       agent: "build",
-      model: {
-        providerID: "openai",
-        modelID: "gpt-5",
-        variant: "default",
-      },
     });
   });
 

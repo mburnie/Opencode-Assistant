@@ -1,4 +1,3 @@
-import type { ModelInfo } from "../model/types.js";
 import { cloneScheduledTask, type ScheduledTask } from "../scheduled-task/types.js";
 import type { TtsProvider } from "../config.js";
 import path from "node:path";
@@ -87,7 +86,6 @@ export interface Settings {
     whatsapp?: SessionInfo;
   };
   currentAgent?: string;
-  currentModel?: ModelInfo;
   pinnedMessageId?: number;
   ttsEnabled?: boolean;
   sessionDirectoryCache?: SessionDirectoryCacheInfo;
@@ -212,20 +210,6 @@ export function setCurrentAgent(agentName: string): void {
 
 export function clearCurrentAgent(): void {
   currentSettings.currentAgent = undefined;
-  void writeSettingsFile(currentSettings);
-}
-
-export function getCurrentModel(): ModelInfo | undefined {
-  return currentSettings.currentModel;
-}
-
-export function setCurrentModel(modelInfo: ModelInfo): void {
-  currentSettings.currentModel = modelInfo;
-  void writeSettingsFile(currentSettings);
-}
-
-export function clearCurrentModel(): void {
-  currentSettings.currentModel = undefined;
   void writeSettingsFile(currentSettings);
 }
 

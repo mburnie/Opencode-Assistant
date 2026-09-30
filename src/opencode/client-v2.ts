@@ -116,6 +116,12 @@ export interface SessionListItem {
   title?: string;
   time: { created: number; updated: number };
   parentID?: string;
+  /**
+   * Model currently active on the OpenCode session, as reported by the
+   * server. Absent when the session has no explicit model yet (the server
+   * then applies its own default).
+   */
+  model?: { providerID: string; modelID: string; variant?: string };
 }
 
 function toSessionListItem(session: SessionInfo): SessionListItem {
@@ -125,6 +131,13 @@ function toSessionListItem(session: SessionInfo): SessionListItem {
     title: session.title,
     time: session.time,
     parentID: session.parentID,
+    model: session.model
+      ? {
+          providerID: session.model.providerID,
+          modelID: session.model.id,
+          variant: session.model.variant,
+        }
+      : undefined,
   };
 }
 
@@ -358,7 +371,7 @@ async function switchSessionAgent(
   return { error };
 }
 
-async function switchSessionModel(
+export async function switchSessionModel(
   sessionID: string,
   model: { providerID: string; modelID: string; variant?: string },
 ): Promise<{ error?: unknown }> {
@@ -531,13 +544,40 @@ export async function replyToPermission(
 export function toLegacyPermissionRequest(
   request: NewPermissionRequest,
 ): LegacyPermissionRequest {
+  // V2 permission payloads use `action`/`resources`; older/other payloads may
+  // use `permission`/`patterns`. Normalize defensively so downstream rendering
+  // never receives undefined arrays or a missing permission name.
+  const v2 = request as NewPermissionRequest & {
+    permission?: unknown;
+    patterns?: unknown;
+    always?: unknown;
+  };
+
+  const actionCandidate = request.action ?? v2.permission;
+  const action = typeof actionCandidate === "string" ? actionCandidate : "";
+
+  const resourcesCandidate = request.resources ?? v2.patterns;
+  const resources = Array.isArray(resourcesCandidate)
+    ? resourcesCandidate.filter((entry): entry is string => typeof entry === "string")
+    : [];
+
+  const alwaysCandidate = request.save ?? v2.always;
+  const always = Array.isArray(alwaysCandidate)
+    ? alwaysCandidate.filter((entry): entry is string => typeof entry === "string")
+    : [];
+
+  const metadata =
+    request.metadata && typeof request.metadata === "object"
+      ? (request.metadata as { [key: string]: unknown })
+      : {};
+
   return {
     id: request.id,
     sessionID: request.sessionID,
-    permission: request.action,
-    patterns: request.resources,
-    metadata: (request.metadata ?? {}) as { [key: string]: unknown },
-    always: (request.save ?? []) as string[],
+    permission: action,
+    patterns: resources,
+    metadata,
+    always,
   };
 }
 

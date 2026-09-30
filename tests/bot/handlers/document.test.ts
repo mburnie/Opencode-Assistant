@@ -42,7 +42,7 @@ function createDocumentDeps(overrides: Partial<DocumentHandlerDeps> = {}): {
   processPromptMock: ReturnType<typeof vi.fn>;
   downloadMock: ReturnType<typeof vi.fn>;
   getCapabilitiesMock: ReturnType<typeof vi.fn>;
-  getStoredModelMock: ReturnType<typeof vi.fn>;
+  getSessionModelMock: ReturnType<typeof vi.fn>;
 } {
   const processPromptMock = vi.fn().mockResolvedValue(true);
   const downloadMock = vi.fn().mockResolvedValue({
@@ -54,7 +54,7 @@ function createDocumentDeps(overrides: Partial<DocumentHandlerDeps> = {}): {
     input: ["text", "pdf", "image"],
     output: ["text"],
   });
-  const getStoredModelMock = vi.fn().mockReturnValue({
+  const getSessionModelMock = vi.fn().mockResolvedValue({
     providerID: "test-provider",
     modelID: "test-model",
   });
@@ -64,12 +64,13 @@ function createDocumentDeps(overrides: Partial<DocumentHandlerDeps> = {}): {
     ensureEventSubscription: vi.fn().mockResolvedValue(undefined),
     downloadFile: downloadMock,
     getModelCapabilities: getCapabilitiesMock,
-    getStoredModel: getStoredModelMock,
+    getCurrentSessionID: () => "session-1",
+    getSessionModel: getSessionModelMock,
     processPrompt: processPromptMock,
     ...overrides,
   };
 
-  return { deps, processPromptMock, downloadMock, getCapabilitiesMock, getStoredModelMock };
+  return { deps, processPromptMock, downloadMock, getCapabilitiesMock, getSessionModelMock };
 }
 
 describe("bot/handlers/document", () => {

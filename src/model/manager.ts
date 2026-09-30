@@ -1,7 +1,7 @@
-import { getCurrentModel, setCurrentModel } from "../settings/manager.js";
-import { config } from "../config.js";
 import {
   listProvidersWithModels,
+  getSession,
+  switchSessionModel,
   getProviderAuthMethods as getProviderAuthMethodsV2,
   setProviderApiKey as setProviderApiKeyV2,
   getProviderOAuthUrl as getProviderOAuthUrlV2,
@@ -138,17 +138,6 @@ export function __resetFreeModelCacheForTests(): void {
 
 function getModelKey(providerID: string, modelID: string): string {
   return `${providerID}/${modelID}`;
-}
-
-function getEnvDefaultModel(): FavoriteModel | null {
-  const providerID = config.opencode.model.provider;
-  const modelID = config.opencode.model.modelId;
-
-  if (!providerID || !modelID) {
-    return null;
-  }
-
-  return { providerID, modelID };
 }
 
 function dedupeModels(models: FavoriteModel[]): FavoriteModel[] {
@@ -288,11 +277,8 @@ function getOpenCodeModelStatePath(): string {
 
 /**
  * Get favorite and recent models from OpenCode local state file.
- * Config model is always treated as favorite.
  */
 export async function getModelSelectionLists(): Promise<ModelSelectionLists> {
-  const envDefaultModel = getEnvDefaultModel();
-
   try {
     const fs = await import("fs/promises");
 
@@ -308,15 +294,7 @@ export async function getModelSelectionLists(): Promise<ModelSelectionLists> {
     const validatedFavorites = filterModelsByCatalog(rawFavorites, validModelKeys);
     const validatedRecent = filterModelsByCatalog(rawRecent, validModelKeys);
 
-    const favorites = envDefaultModel
-      ? dedupeModels([...validatedFavorites, envDefaultModel])
-      : validatedFavorites;
-
-    if (rawFavorites.length === 0 && envDefaultModel) {
-      logger.info(
-        `[ModelManager] No favorites in ${stateFilePath}, using config model as favorite`,
-      );
-    }
+    const favorites = dedupeModels(validatedFavorites);
 
     if (favorites.length === 0) {
       logger.warn(`[ModelManager] No favorites in ${stateFilePath}`);
@@ -344,67 +322,12 @@ export async function getModelSelectionLists(): Promise<ModelSelectionLists> {
 
     return { favorites, recent };
   } catch (err) {
-    if (envDefaultModel) {
-      logger.warn(
-        "[ModelManager] Failed to load OpenCode model state, using config model as favorite:",
-        err,
-      );
-      return {
-        favorites: [envDefaultModel],
-        recent: [],
-      };
-    }
-
     logger.error("[ModelManager] Failed to load OpenCode model state:", err);
     return {
       favorites: [],
       recent: [],
     };
   }
-}
-
-/**
- * Validate stored selected model against OpenCode providers catalog.
- * If selected model is unavailable, fallback to env default model.
- */
-export async function reconcileStoredModelSelection(): Promise<void> {
-  const currentModel = getCurrentModel();
-
-  if (!currentModel?.providerID || !currentModel.modelID) {
-    return;
-  }
-
-  const validModelKeys = await getValidModelKeys();
-
-  if (!validModelKeys) {
-    logger.warn("[ModelManager] Skipping stored model validation: model catalog unavailable");
-    return;
-  }
-
-  const currentModelKey = getModelKey(currentModel.providerID, currentModel.modelID);
-
-  if (validModelKeys.has(currentModelKey)) {
-    return;
-  }
-
-  const envDefaultModel = getEnvDefaultModel();
-  if (!envDefaultModel) {
-    logger.warn(
-      `[ModelManager] Stored model ${currentModelKey} is unavailable and env default model is missing`,
-    );
-    return;
-  }
-
-  const fallbackKey = getModelKey(envDefaultModel.providerID, envDefaultModel.modelID);
-  logger.warn(
-    `[ModelManager] Stored model ${currentModelKey} is unavailable, falling back to ${fallbackKey}`,
-  );
-
-  setCurrentModel({
-    providerID: envDefaultModel.providerID,
-    modelID: envDefaultModel.modelID,
-    variant: "default",
-  });
 }
 
 export function __resetModelCatalogCacheForTests(): void {
@@ -566,8 +489,7 @@ export async function getProviderOAuthUrl(
 }
 
 /**
- * Get list of favorite models from OpenCode local state file
- * Falls back to env default model if file is unavailable or empty
+ * Get list of favorite models from OpenCode local state file.
  */
 export async function getFavoriteModels(): Promise<FavoriteModel[]> {
   const { favorites } = await getModelSelectionLists();
@@ -575,53 +497,75 @@ export async function getFavoriteModels(): Promise<FavoriteModel[]> {
 }
 
 /**
- * Get current model from settings or fallback to config
- * @returns Current model info
+ * Error thrown when the model of the attached OpenCode session cannot be
+ * resolved. Leroy has no model of its own — it must follow the session — so
+ * this is a hard failure rather than a reason to fall back.
  */
-export function fetchCurrentModel(): ModelInfo {
-  return getStoredModel();
+export class SessionModelUnavailableError extends Error {
+  constructor(sessionID: string) {
+    super(
+      `Could not read the model of OpenCode session ${sessionID}. ` +
+        "Leroy follows the model of its attached session and has no model of its own, " +
+        "so it cannot continue. Make sure the session exists and has a model selected " +
+        "(in OpenCode or via /model), then try again.",
+    );
+    this.name = "SessionModelUnavailableError";
+  }
 }
 
 /**
- * Select model and persist to settings
- * @param modelInfo Model to select
+ * Resolve the model of the attached OpenCode session or throw a clear error.
+ * Never substitutes a default model.
  */
-export function selectModel(modelInfo: ModelInfo): void {
-  logger.info(`[ModelManager] Selected model: ${modelInfo.providerID}/${modelInfo.modelID}`);
-  setCurrentModel(modelInfo);
+export async function requireSessionModel(sessionID: string): Promise<ModelInfo> {
+  const model = await fetchSessionModel(sessionID);
+  if (!model) {
+    throw new SessionModelUnavailableError(sessionID);
+  }
+  return model;
 }
 
 /**
- * Get stored model from settings (synchronous)
- * ALWAYS returns a model - fallback to config if not found
- * @returns Current model info
+ * Nullable variant for display-only paths (e.g. highlighting the active model
+ * in the picker). Never throws; callers render "not set" when null.
  */
-export function getStoredModel(): ModelInfo {
-  const storedModel = getCurrentModel();
+export async function getSessionModelSafe(sessionID: string): Promise<ModelInfo | null> {
+  return fetchSessionModel(sessionID);
+}
 
-  if (storedModel) {
-    // Ensure variant is set (default to "default")
-    if (!storedModel.variant) {
-      storedModel.variant = "default";
-    }
-    return storedModel;
+/**
+ * Change the model on the OpenCode session itself. This is the only way
+ * Leroy selects a model: it mutates the session, not a Leroy setting.
+ */
+export async function setSessionModel(
+  sessionID: string,
+  model: ModelInfo,
+): Promise<{ error?: unknown }> {
+  return switchSessionModel(sessionID, model);
+}
+
+/**
+ * Read the model currently active on an OpenCode session.
+ *
+ * This reflects what the session itself is using (including models chosen
+ * directly in OpenCode), not the `.env` configured default. Returns null
+ * when the session has no model or the server request fails, so callers
+ * can decide on a fallback without forcing a value onto the session.
+ */
+export async function fetchSessionModel(sessionID: string): Promise<ModelInfo | null> {
+  if (!sessionID) {
+    return null;
   }
 
-  // Fallback to model from config (environment variables)
-  if (config.opencode.model.provider && config.opencode.model.modelId) {
-    logger.debug("[ModelManager] Using model from config");
-    return {
-      providerID: config.opencode.model.provider,
-      modelID: config.opencode.model.modelId,
-      variant: "default",
-    };
+  const { data, error } = await getSession(sessionID);
+
+  if (error || !data?.model?.providerID || !data.model.modelID) {
+    return null;
   }
 
-  // This should not happen if config is properly set
-  logger.warn("[ModelManager] No model found in settings or config, returning empty model");
   return {
-    providerID: "",
-    modelID: "",
-    variant: "default",
+    providerID: data.model.providerID,
+    modelID: data.model.modelID,
+    variant: data.model.variant,
   };
 }

@@ -11,7 +11,7 @@ import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
 import { getCurrentProject, isTtsEnabled } from "../../settings/manager.js";
 import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
-import { getStoredModel, isFreeModel } from "../../model/manager.js";
+import { requireSessionModel, isFreeModel } from "../../model/manager.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { stopEventListening } from "../../opencode/events.js";
 import { interactionManager } from "../../interaction/manager.js";
@@ -225,7 +225,25 @@ export async function processUserPrompt(
 
   try {
     const currentAgent = await resolveProjectAgent(getStoredAgent());
-    const storedModel = getStoredModel();
+
+    // Leroy has no model of its own: the model already active on the attached
+    // OpenCode session is the source of truth. If it cannot be resolved we
+    // fail loudly instead of substituting a default. No model override is ever
+    // sent here — a model only changes when the user picks one via /model,
+    // which mutates the session itself.
+    let effectiveModel;
+    try {
+      effectiveModel = await requireSessionModel(currentSession.id);
+    } catch (modelError) {
+      foregroundSessionState.markIdle(currentSession.id);
+      await markAttachedSessionIdle(currentSession.id);
+      logger.error(
+        `[Bot] Cannot resolve model for session ${currentSession.id}; refusing to send prompt`,
+        modelError,
+      );
+      await ctx.reply(t("bot.session_model_unavailable"));
+      return false;
+    }
 
     // Build prompt text and file list for the new SDK shape.
     let promptText = "";
@@ -248,33 +266,24 @@ export async function processUserPrompt(
     // approval-scope constraint so out-of-scope accesses must be explicitly
     // approved (tool-level permission rules back this up for write/shell/etc.).
     const currentModelIsFree =
-      storedModel.providerID && storedModel.modelID
-        ? await isFreeModel(storedModel.providerID, storedModel.modelID)
+      effectiveModel.providerID && effectiveModel.modelID
+        ? await isFreeModel(effectiveModel.providerID, effectiveModel.modelID)
         : false;
     if (currentModelIsFree) {
       logger.info(
-        `[Bot] Free model detected (${storedModel.providerID}/${storedModel.modelID}); ` +
+        `[Bot] Free model detected (${effectiveModel.providerID}/${effectiveModel.modelID}); ` +
           "appending approval-scope instruction",
       );
       promptText = `${promptText}\n\n${FREE_MODEL_SCOPE_INSTRUCTION}`.trim();
     }
 
-    const promptModel =
-      storedModel.providerID && storedModel.modelID
-        ? {
-            providerID: storedModel.providerID,
-            modelID: storedModel.modelID,
-            variant: storedModel.variant,
-          }
-        : undefined;
-
     const promptErrorLogContext = {
       sessionId: currentSession.id,
       directory: currentSession.directory,
       agent: currentAgent || "default",
-      modelProvider: storedModel.providerID || "default",
-      modelId: storedModel.modelID || "default",
-      variant: storedModel.variant || "default",
+      modelProvider: effectiveModel.providerID,
+      modelId: effectiveModel.modelID,
+      variant: effectiveModel.variant || "default",
       promptLength: text.length,
       fileCount: fileParts.length,
     };
@@ -288,8 +297,8 @@ export async function processUserPrompt(
     assistantRunState.startRun(currentSession.id, {
       startedAt: Date.now(),
       configuredAgent: currentAgent,
-      configuredProviderID: storedModel.providerID,
-      configuredModelID: storedModel.modelID,
+      configuredProviderID: effectiveModel.providerID,
+      configuredModelID: effectiveModel.modelID,
     });
     setPromptResponseMode(currentSession.id, responseMode);
 
@@ -310,7 +319,6 @@ export async function processUserPrompt(
           text: promptText,
           files: promptFiles,
           agent: currentAgent,
-          model: promptModel,
         }),
       onSuccess: ({ error }) => {
         if (error) {

@@ -30,12 +30,6 @@ interface CronYmlFile {
   crons?: CronYmlEntry[];
 }
 
-const DEFAULT_MODEL = {
-  providerID: config.opencode.model.provider,
-  modelID: config.opencode.model.modelId,
-  variant: null,
-};
-
 const DEFAULT_WORKTREE = process.env.MEMORY_DIR
   ? path.resolve(process.env.MEMORY_DIR, "..")
   : process.cwd();
@@ -158,7 +152,7 @@ export async function syncFromYml(): Promise<void> {
         cron: entry.schedule,
         projectId: "default",
         projectWorktree: DEFAULT_WORKTREE,
-        model: { ...DEFAULT_MODEL },
+        model: null,
         scheduleText: entry.schedule,
         scheduleSummary: entry.schedule,
         timezone,

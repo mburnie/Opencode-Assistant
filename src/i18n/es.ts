@@ -107,6 +107,8 @@ export const es: I18nDictionary = {
   "bot.file_download_error": "🔴 No se pudo descargar el archivo",
   "bot.model_no_pdf": "⚠️ El modelo actual no admite entrada PDF. Enviaré solo texto.",
   "bot.text_file_too_large": "⚠️ El archivo de texto es demasiado grande (max {maxSizeKb}KB)",
+  "bot.session_model_unavailable":
+    "🔴 No se puede determinar el modelo de la sesión de OpenCode adjunta. Leroy sigue el modelo de la sesión y no tiene modelo propio, por lo que no se envió la solicitud. Selecciona un modelo para la sesión en OpenCode (o con /model) e inténtalo de nuevo.",
 
   "status.header_running": "🟢 OpenCode Server está en ejecución",
   "status.health.healthy": "Saludable",
@@ -119,6 +121,7 @@ export const es: I18nDictionary = {
   "status.line.uptime_sec": "Tiempo activo: {seconds} s",
   "status.line.mode": "Agente: {mode}",
   "status.line.model": "Modelo: {model}",
+  "status.model_unknown": "desconocido (sin modelo de sesión)",
   "status.line.tts": "Respuestas TTS: {tts}",
   "status.tts.on": "Activadas",
   "status.tts.off": "Desactivadas",
@@ -312,6 +315,8 @@ export const es: I18nDictionary = {
 
   "model.changed_callback": "Modelo cambiado: {name}",
   "model.changed_message": "✅ Modelo cambiado a: {name}",
+  "model.no_session":
+    "⚠️ No hay sesión activa. Abre o crea una sesión primero y luego elige un modelo — el modelo se cambia en la propia sesión.",
   "model.change_error_callback": "No se pudo cambiar el modelo",
   "model.menu.empty": "⚠️ No hay modelos disponibles",
   "model.menu.select": "Selecciona el modelo:",
@@ -392,6 +397,8 @@ export const es: I18nDictionary = {
   "permission.name.task": "Tarea",
   "permission.name.lsp": "LSP",
   "permission.name.external_directory": "Directorio externo",
+  "permission.name.generic": "Solicitud de permiso de herramienta",
+  "permission.name.generic_tool": "Solicitud de permiso de herramienta: {tool}",
 
   "question.inactive_callback": "La encuesta está inactiva",
   "question.processing_error_callback": "Error de procesamiento",
@@ -460,6 +467,7 @@ export const es: I18nDictionary = {
   "pinned.line.project": "Proyecto: {project}",
   "pinned.line.worktree": "Worktree: {worktree}",
   "pinned.line.model": "Modelo: {model}",
+  "pinned.model_none": "desconocido",
   "pinned.line.attach": "Tracking: {status}",
   "pinned.attach.status.idle": "activo, idle",
   "pinned.attach.status.busy": "activo, busy",
@@ -543,6 +551,7 @@ export const es: I18nDictionary = {
   "task.created":
     "✅ Tarea programada creada\n\nTarea: {description}\nProyecto: {project}\nModelo: {model}\nHorario: {schedule}\n{cronLine}Próxima ejecución: {nextRunAt}",
   "task.created.cron": "Cron: {cron}",
+  "task.model_follows_session": "modelo de la sesión (sigue la sesión de OpenCode)",
   "task.button.retry_schedule": "🔁 Volver a introducir horario",
   "task.button.cancel": "❌ Cancelar",
   "task.retry_schedule_callback": "Volviendo a introducir el horario...",
@@ -635,7 +644,7 @@ export const es: I18nDictionary = {
   "legacy.models.empty": "📋 No hay modelos disponibles. Configura los proveedores en OpenCode.",
   "legacy.models.header": "📋 Modelos disponibles:\n\n",
   "legacy.models.no_provider_models": "  ⚠️ No hay modelos disponibles\n",
-  "legacy.models.env_hint": "💡 Para usar el modelo en .env:\n",
+  "legacy.models.session_hint": "💡 Para usar el modelo en .env:\n",
   "legacy.models.error": "🔴 Ocurrió un error al cargar la lista de modelos.",
 
   "stt.recognizing": "🎤 Reconociendo audio...",

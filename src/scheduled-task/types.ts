@@ -17,7 +17,13 @@ export interface ScheduledTaskBase {
   type: ScheduledTaskType;
   projectId: string;
   projectWorktree: string;
-  model: ScheduledTaskModel;
+  /**
+   * Optional per-task model override. When null/absent the task follows the
+   * model of the OpenCode session it executes against (Leroy has no model of
+   * its own). The explicit `/model` selection is NOT stored here — only a
+   * caller-provided override is.
+   */
+  model: ScheduledTaskModel | null;
   scheduleText: string;
   scheduleSummary: string;
   timezone: string;
@@ -66,7 +72,7 @@ export interface TaskCreationState {
   stage: "awaiting_schedule" | "parsing_schedule" | "awaiting_prompt";
   projectId: string;
   projectWorktree: string;
-  model: ScheduledTaskModel;
+  model: ScheduledTaskModel | null;
   scheduleText: string | null;
   parsedSchedule: ParsedTaskSchedule | null;
   scheduleRequestMessageId: number | null;
@@ -86,8 +92,8 @@ export function cloneParsedTaskSchedule(schedule: ParsedTaskSchedule): ParsedTas
   return { ...schedule };
 }
 
-export function cloneScheduledTaskModel(model: ScheduledTaskModel): ScheduledTaskModel {
-  return { ...model };
+export function cloneScheduledTaskModel(model: ScheduledTaskModel | null): ScheduledTaskModel | null {
+  return model ? { ...model } : null;
 }
 
 export function cloneScheduledTask(task: ScheduledTask): ScheduledTask {

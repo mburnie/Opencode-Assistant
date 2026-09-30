@@ -3,6 +3,7 @@ import type { Bot } from "grammy";
 import type { CodeFileData } from "./formatter.js";
 import { normalizePathForDisplay, prepareCodeFile } from "./formatter.js";
 import type { PermissionRequest } from "../permission/types.js";
+import { toLegacyPermissionRequest } from "../opencode/client-v2.js";
 import type { FormInfo } from "@opencode/client/promise";
 import type { FileChange } from "../pinned/types.js";
 import { logger } from "../utils/logger.js";
@@ -136,6 +137,10 @@ class SummaryAggregator {
   private messages: Map<string, { role: string }> = new Map();
   private messageCount = 0;
   private lastUpdated = 0;
+  // OpenCode v2 ends a successful turn with session.execution.succeeded;
+  // session.idle is kept as a fallback. Remembers which signal completed the
+  // latest turn so the other one, if also emitted, does not complete it twice.
+  private turnCompletionSignals: Map<string, "succeeded" | "idle"> = new Map();
   private onCompleteCallback: MessageCompleteCallback | null = null;
   private onPartialCallback: MessagePartialCallback | null = null;
   private onExternalUserInputCallback: ExternalUserInputCallback | null = null;
@@ -334,6 +339,7 @@ class SummaryAggregator {
         this.handleSessionStatus(event);
         break;
       case "session.idle":
+      case "session.execution.succeeded":
         this.handleSessionIdle(event);
         break;
       case "session.compaction.started":
@@ -366,7 +372,9 @@ class SummaryAggregator {
         this.handlePermissionAsked(event);
         break;
       case "permission.replied":
-        logger.info(`[Aggregator] Permission replied: requestID=${(event as any).data?.id}`);
+        logger.info(
+          `[Aggregator] Permission replied: requestID=${event.data.requestID}, reply=${event.data.reply}, session=${event.data.sessionID}`,
+        );
         break;
       case "form.created":
         this.handleFormCreated(event);
@@ -402,7 +410,6 @@ class SummaryAggregator {
       case "session.inbox.cancelled":
       case "session.inbox.delivery.changed":
       case "session.execution.started":
-      case "session.execution.succeeded":
         // Handled elsewhere or no aggregator action needed
         break;
       default:
@@ -428,6 +435,7 @@ class SummaryAggregator {
     this.processedToolStates.clear();
     this.thinkingFiredForMessages.clear();
     this.deliveredExternalUserMessageIds.clear();
+    this.turnCompletionSignals.clear();
     this.trackedSessionParents.clear();
     this.pendingChildSessionIdsByParent.clear();
     this.subagentTracker.clear();
@@ -946,8 +954,17 @@ class SummaryAggregator {
   }
 
   private handleSessionIdle(event: V2Event): void {
-    if (event.type !== "session.idle") return;
+    if (event.type !== "session.idle" && event.type !== "session.execution.succeeded") return;
     const { sessionID } = event.data;
+
+    const signal = event.type === "session.idle" ? "idle" : "succeeded";
+    const previousSignal = this.turnCompletionSignals.get(sessionID);
+    if (previousSignal && previousSignal !== signal) {
+      // The other completion signal already finished this turn.
+      this.turnCompletionSignals.delete(sessionID);
+      return;
+    }
+    this.turnCompletionSignals.set(sessionID, signal);
 
     if (this.isTrackedChildSession(sessionID)) {
       this.subagentTracker.setTerminalStatus(sessionID, "completed");
@@ -1189,11 +1206,16 @@ class SummaryAggregator {
 
     if (request.sessionID !== this.currentSessionId) return;
 
+    // Normalize the V2 payload (action/resources) into the legacy shape the
+    // permission handler expects. Some payloads (e.g. memory MCP tool calls)
+    // omit `action`, so this must not assume those fields are present.
+    const legacyRequest = toLegacyPermissionRequest(request);
+
     if (this.onPermissionCallback) {
       const callback = this.onPermissionCallback;
       setImmediate(async () => {
         try {
-          await callback(request as unknown as PermissionRequest);
+          await callback(legacyRequest);
         } catch (err) {
           logger.error("[Aggregator] Error in permission callback:", err);
         }

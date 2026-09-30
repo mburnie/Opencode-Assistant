@@ -312,4 +312,69 @@ describe("bot/handlers/permission", () => {
     expect(text).toContain("• D:/data/my_project");
     expect(options).not.toHaveProperty("parse_mode");
   });
+
+  it("renders a generic label with the tool name when permission type is undefined (V2 memory tool)", async () => {
+    const botApi = createBotApi(900);
+
+    // Reproduces the V2 payload that triggered the crash: `permission` is
+    // undefined, `patterns` is undefined, and the tool identity lives under
+    // metadata.toolCalls.
+    const v2Request = {
+      id: "perm-memory",
+      sessionID: "session-1",
+      permission: undefined,
+      patterns: undefined,
+      metadata: {
+        toolCalls: [{ tool: "opencode-assistant-memory.fact_add" }],
+      },
+      always: undefined,
+    } as unknown as PermissionRequest;
+
+    await expect(showPermissionRequest(botApi, 777, v2Request)).resolves.toBeUndefined();
+
+    const sendMessageMock = botApi.sendMessage as unknown as ReturnType<typeof vi.fn>;
+    const [, text, options] = sendMessageMock.mock.calls[0];
+
+    // No TypeError, generic label, and the tool name from metadata is present.
+    expect(text).toContain("Tool permission request");
+    expect(text).toContain("opencode-assistant-memory.fact_add");
+    expect(options).not.toHaveProperty("parse_mode");
+
+    // Prompt still reaches Telegram and is tracked with Allow once / Reject.
+    expect(permissionManager.isActive()).toBe(true);
+    expect(permissionManager.getRequestID(900)).toBe("perm-memory");
+
+    const replyMarkup = (options as { reply_markup: InlineKeyboard }).reply_markup;
+    expect(replyMarkup.inline_keyboard[0]?.[0]?.text).toBe(t("permission.button.allow"));
+    expect(getCallbackData(replyMarkup.inline_keyboard[0]?.[0])).toBe("permission:once");
+    expect(replyMarkup.inline_keyboard[1]?.[0]?.text).toBe(t("permission.button.reject"));
+    expect(getCallbackData(replyMarkup.inline_keyboard[1]?.[0])).toBe("permission:reject");
+    // Security: still no "allow always".
+    expect(
+      replyMarkup.inline_keyboard.some((row) =>
+        row.some((b) => getCallbackData(b) === "permission:always"),
+      ),
+    ).toBe(false);
+  });
+
+  it("falls back to a fully generic label when neither type nor tool name exist", async () => {
+    const botApi = createBotApi(910);
+
+    const bareRequest = {
+      id: "perm-bare",
+      sessionID: "session-1",
+      permission: undefined,
+      patterns: undefined,
+      metadata: {},
+      always: undefined,
+    } as unknown as PermissionRequest;
+
+    await expect(showPermissionRequest(botApi, 777, bareRequest)).resolves.toBeUndefined();
+
+    const sendMessageMock = botApi.sendMessage as unknown as ReturnType<typeof vi.fn>;
+    const [, text] = sendMessageMock.mock.calls[0];
+
+    expect(text).toContain(t("permission.name.generic"));
+    expect(permissionManager.getRequestID(910)).toBe("perm-bare");
+  });
 });

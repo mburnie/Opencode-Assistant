@@ -4,14 +4,12 @@ import { config } from "../../config.js";
 import { getDateLocale, t } from "../../i18n/index.js";
 import { interactionManager } from "../../interaction/manager.js";
 import type { InteractionState } from "../../interaction/types.js";
-import { getStoredModel } from "../../model/manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { taskCreationManager } from "../../scheduled-task/creation-manager.js";
 import { parseTaskSchedule } from "../../scheduled-task/schedule-parser.js";
 import { addScheduledTask, listScheduledTasks } from "../../scheduled-task/store.js";
 import { scheduledTaskRuntime } from "../../scheduled-task/runtime.js";
 import {
-  createScheduledTaskModel,
   type ParsedTaskSchedule,
   type ScheduledTask,
   type TaskCreationState,
@@ -109,8 +107,10 @@ function formatParsedSchedulePromptMessage(schedule: ParsedTaskSchedule): string
 }
 
 function formatTaskCreatedMessage(task: ScheduledTask): string {
-  const variant = task.model.variant ? ` (${task.model.variant})` : "";
-  const model = `${task.model.providerID}/${task.model.modelID}${variant}`;
+  const variant = task.model?.variant ? ` (${task.model.variant})` : "";
+  const model = task.model
+    ? `${task.model.providerID}/${task.model.modelID}${variant}`
+    : t("task.model_follows_session");
   const cronLine = task.kind === "cron" ? `${t("task.created.cron", { cron: task.cron })}\n` : "";
 
   return t("task.created", {
@@ -310,9 +310,10 @@ export async function taskCommand(ctx: CommandContext<Context>): Promise<void> {
     return;
   }
 
-  const currentModel = createScheduledTaskModel(getStoredModel());
-
-  taskCreationManager.start(currentProject.id, currentProject.worktree, currentModel);
+  // No model is captured here: scheduled tasks follow the model of the
+  // OpenCode session they execute against, unless a caller stores an explicit
+  // per-task override.
+  taskCreationManager.start(currentProject.id, currentProject.worktree, null);
   interactionManager.start({
     kind: "task",
     expectedInput: "text",

@@ -17,14 +17,24 @@ describe("runtime/bootstrap", () => {
     expect(result).toEqual({ isValid: true });
   });
 
-  it("fails validation when required model values are missing", () => {
+  it("accepts runtime env values without any global model default", () => {
     const result = validateRuntimeEnvValues({
       TELEGRAM_BOT_TOKEN: "123456:abcdef",
       TELEGRAM_ALLOWED_USER_ID: "123456789",
     });
 
-    expect(result.isValid).toBe(false);
-    expect(result.reason).toContain("OPENCODE_MODEL_PROVIDER");
+    expect(result).toEqual({ isValid: true });
+  });
+
+  it("treats OPENCODE_MODEL_* as optional (no global model default required)", () => {
+    // Leroy follows the session model, so the env model keys are not required.
+    const result = validateRuntimeEnvValues({
+      TELEGRAM_BOT_TOKEN: "123456:abcdef",
+      TELEGRAM_ALLOWED_USER_ID: "123456789",
+    });
+
+    expect(result.isValid).toBe(true);
+    expect(result.reason).toBeUndefined();
   });
 
   it("fails validation for invalid user id", () => {

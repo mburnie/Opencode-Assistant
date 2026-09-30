@@ -1,7 +1,14 @@
 import { CommandContext, Context } from "grammy";
-import { getActiveSessions, interruptSession } from "../../opencode/client-v2.js";
+import {
+  cancelForm,
+  getActiveSessions,
+  getSessionForm,
+  interruptSession,
+  listSessionForms,
+} from "../../opencode/client-v2.js";
 import { getCurrentSession } from "../../session/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
+import { formManager } from "../../form/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { foregroundSessionState } from "../../scheduled-task/foreground-state.js";
@@ -18,6 +25,64 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 function abortLocalStreaming(): void {
   clearAllInteractionState("abort_command");
+}
+
+interface ActiveFormRef {
+  sessionId: string;
+  formId: string;
+}
+
+function getActiveFormRef(): ActiveFormRef | null {
+  const sessionId = formManager.getSessionID();
+  const formId = formManager.getFormId();
+  return formManager.isActive() && sessionId && formId ? { sessionId, formId } : null;
+}
+
+/**
+ * Clearing local form state alone leaves OpenCode v2 forms pending on the
+ * server, where a late form.created event or a later re-attach restores them
+ * and the interaction guard blocks ordinary messages again. Cancel them there.
+ * Never throws: abort must still complete if OpenCode is unreachable.
+ */
+async function cancelPendingForms(sessionId: string, activeForm: ActiveFormRef | null): Promise<void> {
+  try {
+    const formIds = new Set<string>();
+    if (activeForm && activeForm.sessionId === sessionId) {
+      formIds.add(activeForm.formId);
+    }
+
+    const { data: forms, error } = await listSessionForms(sessionId);
+    if (error || !forms) {
+      logger.warn("[Abort] Failed to list pending forms:", error);
+    } else {
+      for (const form of forms) {
+        const { data: detail } = await getSessionForm(sessionId, form.id);
+        if (detail?.state.status === "pending") {
+          formIds.add(form.id);
+        }
+      }
+    }
+
+    for (const formId of formIds) {
+      const { error: cancelError } = await cancelForm(sessionId, formId);
+      if (cancelError) {
+        logger.warn(`[Abort] Failed to cancel form ${formId}:`, cancelError);
+      } else {
+        logger.info(`[Abort] Cancelled pending form: session=${sessionId}, form=${formId}`);
+      }
+    }
+  } catch (error) {
+    logger.warn("[Abort] Error while cancelling pending forms:", error);
+  }
+}
+
+/**
+ * Cancels pending forms server-side, then clears local interaction state again
+ * in case a form.created event re-activated it while the abort was in flight.
+ */
+async function releaseForms(sessionId: string, activeForm: ActiveFormRef | null): Promise<void> {
+  await cancelPendingForms(sessionId, activeForm);
+  abortLocalStreaming();
 }
 
 async function pollSessionStatus(
@@ -63,11 +128,15 @@ export async function abortCurrentOperation(
   const notifyUser = options.notifyUser ?? true;
 
   try {
+    const activeForm = getActiveFormRef();
     abortLocalStreaming();
 
     const currentSession = getCurrentSession();
 
     if (!currentSession) {
+      if (activeForm) {
+        await releaseForms(activeForm.sessionId, activeForm);
+      }
       if (notifyUser) {
         await ctx.reply(t("stop.no_active_session"));
       }
@@ -98,6 +167,9 @@ export async function abortCurrentOperation(
       );
 
       clearTimeout(timeoutId);
+
+      // Before polling: a pending form can keep the session running.
+      await releaseForms(currentSession.id, activeForm);
 
       if (abortError) {
         logger.warn("[Abort] Abort request failed:", abortError);
@@ -134,6 +206,7 @@ export async function abortCurrentOperation(
       }
     } catch (error) {
       clearTimeout(timeoutId);
+      await releaseForms(currentSession.id, activeForm);
 
       if (error instanceof Error && error.name === "AbortError") {
         if (notifyUser && chatId !== null && waitingMessageId !== null) {

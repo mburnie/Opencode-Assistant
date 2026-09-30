@@ -25,8 +25,11 @@ const MAX_BODY_SIZE_BYTES = 1024 * 1024; // 1 MiB — generous; tools/list respo
 /**
  * Starts an HTTP MCP server that accepts JSON-RPC 2.0 requests via POST and
  * dispatches them to `handleRequest` from memory-server.ts. Used so a
- * separate OpenCode container (in the same docker compose network) can
- * reach the bot's memory tools without sharing a process tree.
+ * separate OpenCode process on the same machine can reach the bot's memory
+ * tools without sharing a process tree.
+ *
+ * The listener binds to localhost by default: the memory tools are
+ * unauthenticated, so the server must not be reachable from other machines.
  *
  * Spec note: this is the simplest variant of MCP's HTTP transport — plain
  * request/response, no SSE streaming. Sufficient for the synchronous
@@ -37,7 +40,7 @@ export function startMcpHttpServer(
   options: McpHttpServerOptions,
 ): Promise<McpHttpServerHandle> {
   const path = options.path ?? "/mcp";
-  const host = options.host ?? "0.0.0.0";
+  const host = options.host ?? "127.0.0.1";
 
   const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && (req.url === "/" || req.url === "/health")) {

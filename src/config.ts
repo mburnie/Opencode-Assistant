@@ -22,10 +22,6 @@ export interface AppConfig {
     password: string;
     autoRestartEnabled: boolean;
     monitorIntervalSec: number;
-    model: {
-      provider: string;
-      modelId: string;
-    };
   };
   server: {
     logLevel: string;
@@ -250,10 +246,6 @@ export function loadConfig(): AppConfig {
       password: getEnvVar("OPENCODE_SERVER_PASSWORD", false),
       autoRestartEnabled: getOptionalBooleanEnvVar("OPENCODE_AUTO_RESTART_ENABLED", false),
       monitorIntervalSec: getOptionalPositiveIntEnvVar("OPENCODE_MONITOR_INTERVAL_SEC", 300),
-      model: {
-        provider: getEnvVar("OPENCODE_MODEL_PROVIDER", true),
-        modelId: getEnvVar("OPENCODE_MODEL_ID", true),
-      },
     },
     server: {
       logLevel: getEnvVar("LOG_LEVEL", false) || "info",
@@ -327,13 +319,14 @@ export function loadConfig(): AppConfig {
     },
     mcp: {
       // The bot exposes its memory MCP server over HTTP on this host:port so
-      // a separate OpenCode container can reach it as a remote MCP server.
+      // OpenCode can reach it as a remote MCP server (same machine).
       httpEnabled: getOptionalBooleanEnvVar("MCP_HTTP_ENABLED", true),
       httpPort: getOptionalPositiveIntEnvVar("MCP_HTTP_PORT", 4097),
-      // Bind on 0.0.0.0 inside the container so the OpenCode container
-      // (in the same compose network) can reach it. The port is not
-      // forwarded to the host by default — only the docker network sees it.
-      httpHost: getEnvVar("MCP_HTTP_HOST", false) || "0.0.0.0",
+      // Localhost only by default: the unauthenticated memory MCP listener
+      // must not be reachable from other machines on the network. OpenCode
+      // connects through http://127.0.0.1:4097/mcp. Override with MCP_HTTP_HOST
+      // only when an explicit cross-machine setup requires it.
+      httpHost: getEnvVar("MCP_HTTP_HOST", false) || "127.0.0.1",
     },
     cron: {
       ymlSync: getOptionalBooleanEnvVar("CRON_YML_SYNC", true),

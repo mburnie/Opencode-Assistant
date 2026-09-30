@@ -242,11 +242,7 @@ describe("bot/commands/task", () => {
       expect.objectContaining({
         projectId: "project-1",
         projectWorktree: "D:\\Projects\\Repo",
-        model: {
-          providerID: "openai",
-          modelID: "gpt-5",
-          variant: "default",
-        },
+        model: null,
         kind: "cron",
         scheduleText: "every day at 17:00",
         scheduleSummary: "Every day at 17:00",
@@ -261,7 +257,7 @@ describe("bot/commands/task", () => {
     const successCall = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
     expect(successCall[0]).toContain("Send me a daily summary");
     expect(successCall[0]).toContain("D:\\Projects\\Repo");
-    expect(successCall[0]).toContain("openai/gpt-5 (default)");
+    expect(successCall[0]).toContain(t("task.model_follows_session"));
     expect(successCall[0]).toContain("Every day at 17:00");
     expect(successCall[0]).toContain("Cron: 0 17 * * *");
     expect(taskCreationManager.isActive()).toBe(false);

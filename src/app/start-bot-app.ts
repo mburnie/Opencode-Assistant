@@ -10,7 +10,6 @@ import { registerReminderTarget, setReminderBot } from "../cron/reminder.js";
 import { startCronYmlSync, stopCronYmlSync } from "../cron/yml-sync.js";
 import { startWhatsApp, stopWhatsApp } from "../whatsapp/runtime.js";
 import { warmupSessionDirectoryCache } from "../session/cache-manager.js";
-import { reconcileStoredModelSelection } from "../model/manager.js";
 import { startMemorySummaryWatcher, stopMemorySummaryWatcher } from "../memory/watcher.js";
 import { migrateFromFiles, syncIdentityDocumentsFromFiles } from "../memory/migrate-from-files.js";
 import { closeDb } from "../memory/db.js";
@@ -82,7 +81,6 @@ export async function startBotApp(): Promise<void> {
   logger.debug(`[Runtime] Application start mode: ${mode}`);
 
   await loadSettings();
-  await reconcileStoredModelSelection();
   await opencodeAutoRestartService.start();
   await warmupSessionDirectoryCache();
 

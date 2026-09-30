@@ -104,6 +104,8 @@ export const en = {
   "bot.file_too_large": "⚠️ File is too large (max {maxSizeMb}MB)",
   "bot.file_download_error": "🔴 Failed to download file",
   "bot.model_no_pdf": "⚠️ Current model doesn't support PDF input. Sending text only.",
+  "bot.session_model_unavailable":
+    "🔴 Cannot determine the model of the attached OpenCode session. Leroy follows the session's model and has no model of its own, so the request was not sent. Select a model for the session in OpenCode (or via /model) and try again.",
   "bot.text_file_too_large": "⚠️ Text file is too large (max {maxSizeKb}KB)",
 
   "status.header_running": "🟢 OpenCode Server is running",
@@ -117,6 +119,7 @@ export const en = {
   "status.line.uptime_sec": "Uptime: {seconds} sec",
   "status.line.mode": "Agent: {mode}",
   "status.line.model": "Model: {model}",
+  "status.model_unknown": "unknown (no session model)",
   "status.line.tts": "TTS replies: {tts}",
   "status.tts.on": "On",
   "status.tts.off": "Off",
@@ -302,6 +305,8 @@ export const en = {
 
   "model.changed_callback": "Model changed: {name}",
   "model.changed_message": "✅ Model changed to: {name}",
+  "model.no_session":
+    "⚠️ No active session. Open or create a session first, then pick a model — the model is changed on the session itself.",
   "model.change_error_callback": "Failed to change model",
   "model.menu.empty": "⚠️ No available models",
   "model.menu.select": "Select model:",
@@ -382,6 +387,8 @@ export const en = {
   "permission.name.task": "Task",
   "permission.name.lsp": "LSP",
   "permission.name.external_directory": "External Directory",
+  "permission.name.generic": "Tool permission request",
+  "permission.name.generic_tool": "Tool permission request: {tool}",
 
   "question.inactive_callback": "Poll is inactive",
   "question.processing_error_callback": "Processing error",
@@ -449,6 +456,7 @@ export const en = {
   "pinned.line.project": "Project: {project}",
   "pinned.line.worktree": "Worktree: {worktree}",
   "pinned.line.model": "Model: {model}",
+  "pinned.model_none": "unknown",
   "pinned.line.attach": "Tracking: {status}",
   "pinned.attach.status.idle": "active, idle",
   "pinned.attach.status.busy": "active, busy",
@@ -530,6 +538,7 @@ export const en = {
   "task.created":
     "✅ Scheduled task created\n\nTask: {description}\nProject: {project}\nModel: {model}\nSchedule: {schedule}\n{cronLine}Next run: {nextRunAt}",
   "task.created.cron": "Cron: {cron}",
+  "task.model_follows_session": "session model (follows the OpenCode session)",
   "task.button.retry_schedule": "🔁 Re-enter schedule",
   "task.button.cancel": "❌ Cancel",
   "task.retry_schedule_callback": "Re-entering schedule...",
@@ -620,7 +629,8 @@ export const en = {
   "legacy.models.empty": "📋 No available models. Configure providers in OpenCode.",
   "legacy.models.header": "📋 Available models:\n\n",
   "legacy.models.no_provider_models": "  ⚠️ No available models\n",
-  "legacy.models.env_hint": "💡 To use model in .env:\n",
+  "legacy.models.session_hint":
+    "💡 Leroy uses the model of the OpenCode session it is attached to — pick a model per session in OpenCode or via /model.",
   "legacy.models.error": "🔴 An error occurred while loading models list.",
 
   "stt.recognizing": "🎤 Recognizing audio...",

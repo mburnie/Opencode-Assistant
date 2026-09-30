@@ -1,4 +1,4 @@
-# Concept
+                                                                                                                                           # Concept
 
 This document defines the current product concept and boundaries for Opencode-Assistant.
 

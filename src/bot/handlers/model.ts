@@ -1,13 +1,14 @@
 import { Context, InlineKeyboard } from "grammy";
 import {
-  selectModel,
-  fetchCurrentModel,
+  setSessionModel,
+  getSessionModelSafe,
   getCategorizedCatalog,
   getProviderAuthMethods,
   setProviderApiKey,
   getProviderOAuthUrl,
   type ProviderEntry,
 } from "../../model/manager.js";
+import { getCurrentSession } from "../../session/manager.js";
 import { formatModelForDisplay } from "../../model/types.js";
 import type { ModelInfo } from "../../model/types.js";
 import { logger } from "../../utils/logger.js";
@@ -116,7 +117,7 @@ function buildProvidersKeyboard(providers: ProviderEntry[], page: number): Inlin
   return kb;
 }
 
-function buildModelsKeyboard(provider: ProviderEntry, current: ModelInfo, page: number): InlineKeyboard {
+function buildModelsKeyboard(provider: ProviderEntry, current: ModelInfo | null, page: number): InlineKeyboard {
   const kb = new InlineKeyboard();
   const total = totalPages(provider.models.length);
   const safePage = clampPage(page, total);
@@ -125,7 +126,7 @@ function buildModelsKeyboard(provider: ProviderEntry, current: ModelInfo, page: 
 
   slice.forEach((m, i) => {
     const idx = start + i;
-    const isActive = current.providerID === provider.id && current.modelID === m.id;
+    const isActive = current?.providerID === provider.id && current?.modelID === m.id;
     const prefix = isActive ? "✅ " : "";
     const label = truncateLabel(`${prefix}${m.name}`);
     kb.text(label, `${MODEL_CALLBACK_PREFIX}model:${idx}`).row();
@@ -156,7 +157,22 @@ function pageHeader(page: number, total: number): string {
 }
 
 async function commitModelSelection(ctx: Context, modelInfo: ModelInfo): Promise<void> {
-  selectModel(modelInfo);
+  const session = getCurrentSession();
+
+  if (!session) {
+    logger.warn("[ModelHandler] Model selection attempted with no active session");
+    await ctx.reply(t("model.no_session"));
+    return;
+  }
+
+  const { error } = await setSessionModel(session.id, modelInfo);
+
+  if (error) {
+    logger.error("[ModelHandler] Failed to switch session model:", error);
+    await ctx.reply(t("model.change_error_callback"));
+    return;
+  }
+
   await pinnedMessageManager.refreshContextLimit();
 
   const displayName = formatModelForDisplay(modelInfo.providerID, modelInfo.modelID);
@@ -266,7 +282,8 @@ async function showModelsStep(
     return;
   }
 
-  const current = fetchCurrentModel();
+  const session = getCurrentSession();
+  const current = session ? await getSessionModelSafe(session.id) : null;
   const total = totalPages(provider.models.length);
   const safePage = clampPage(page, total);
   const text = `${t("model.menu.models_title", { provider: provider.name })}${pageHeader(safePage, total)}`;
