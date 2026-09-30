@@ -125,6 +125,11 @@ interface PreparedToolFileContext {
   fileChange: FileChange | null;
 }
 
+// V2 tool ids that differ from the names the formatters and file handling expect.
+const V2_TOOL_NAME_ALIASES: Record<string, string> = {
+  shell: "bash",
+};
+
 interface TextMessageState {
   orderedPartIds: string[];
   partTexts: Map<string, string>;
@@ -163,6 +168,8 @@ class SummaryAggregator {
   private onFileChangeCallback: FileChangeCallback | null = null;
   private onClearedCallback: ClearedCallback | null = null;
   private processedToolStates: Set<string> = new Set();
+  private toolCallsById: Map<string, { tool?: string; input?: { [key: string]: unknown } }> =
+    new Map();
   private thinkingFiredForMessages: Set<string> = new Set();
   private deliveredExternalUserMessageIds: Set<string> = new Set();
   private bot: Bot | null = null;
@@ -335,6 +342,8 @@ class SummaryAggregator {
         this.handleToolTerminal(event);
         break;
       case "session.tool.input.started":
+        this.handleToolInputStarted(event);
+        break;
       case "session.tool.input.delta":
       case "session.tool.input.ended":
         break; // streaming input — no aggregator action
@@ -444,6 +453,7 @@ class SummaryAggregator {
     this.messages.clear();
     this.partHashes.clear();
     this.processedToolStates.clear();
+    this.toolCallsById.clear();
     this.thinkingFiredForMessages.clear();
     this.deliveredExternalUserMessageIds.clear();
     this.turnCompletionSignals.clear();
@@ -592,9 +602,30 @@ class SummaryAggregator {
 
   // ─── Tool events (V2 native) ────────────────────────────────────────
 
+  private getToolCall(callId: string): { tool?: string; input?: { [key: string]: unknown } } {
+    let toolCall = this.toolCallsById.get(callId);
+    if (!toolCall) {
+      toolCall = {};
+      this.toolCallsById.set(callId, toolCall);
+    }
+    return toolCall;
+  }
+
+  // V2 only names the tool in session.tool.input.started; tool.called and the
+  // terminal tool events carry just the call id, so remember the name here.
+  private handleToolInputStarted(event: V2Event): void {
+    if (event.type !== "session.tool.input.started") return;
+    const { id, name } = event.data;
+    this.getToolCall(id).tool = V2_TOOL_NAME_ALIASES[name] ?? name;
+  }
+
   private handleToolCalled(event: V2Event): void {
     if (event.type !== "session.tool.called") return;
-    const { sessionID, input } = event.data;
+    const { sessionID, id, input } = event.data;
+
+    // Terminal events do not repeat the input, so keep it for file attachments.
+    const toolCall = this.getToolCall(id);
+    toolCall.input = input as { [key: string]: unknown };
 
     const isCurrentRoot = sessionID === this.currentSessionId;
     const isTrackedChild = this.isTrackedChildSession(sessionID);
@@ -604,7 +635,8 @@ class SummaryAggregator {
       return;
     }
 
-    const toolName = (input as Record<string, unknown>)?.tool as string | undefined;
+    const toolName =
+      toolCall.tool ?? ((input as Record<string, unknown>)?.tool as string | undefined);
 
     if (isTrackedChild) {
       if (toolName === "task") {
@@ -656,12 +688,16 @@ class SummaryAggregator {
     const isCurrentRoot = sessionID === this.currentSessionId;
     const isTrackedChild = this.isTrackedChildSession(sessionID);
 
+    const toolCall = this.toolCallsById.get(id);
+    this.toolCallsById.delete(id);
+
     if (!isCurrentRoot && !isTrackedChild) return;
 
-    const input = isFailed
-      ? (event.data as { input?: { [key: string]: unknown } }).input
-      : undefined;
-    const toolName = (metadata as Record<string, unknown>)?.tool as string | undefined;
+    const input =
+      (isFailed ? (event.data as { input?: { [key: string]: unknown } }).input : undefined) ??
+      toolCall?.input;
+    const toolName =
+      ((metadata as Record<string, unknown>)?.tool as string | undefined) ?? toolCall?.tool;
 
     if (isTrackedChild) {
       this.subagentTracker.updateToolState(
@@ -680,32 +716,30 @@ class SummaryAggregator {
     if (!this.processedToolStates.has(completedKey)) {
       this.processedToolStates.add(completedKey);
 
+      const tool = toolName ?? "unknown";
+      const toolMetadata = metadata as { [key: string]: unknown } | undefined;
+      const preparedFileContext = this.prepareToolFileContext(tool, input, undefined, toolMetadata);
+
       const toolData: ToolInfo = {
         sessionId: sessionID,
         messageId: assistantMessageID,
         callId: id,
-        tool: toolName ?? "unknown",
+        tool,
         state: {
           status: isFailed ? "error" : "completed",
-          input: input as { [key: string]: unknown } | undefined,
+          input,
           error: isFailed ? (event.data as { error?: unknown }).error : undefined,
-          metadata: metadata as { [key: string]: unknown } | undefined,
+          metadata: toolMetadata,
         },
-        input: input as { [key: string]: unknown } | undefined,
-        metadata: metadata as { [key: string]: unknown } | undefined,
-        hasFileAttachment: false,
+        input,
+        metadata: toolMetadata,
+        hasFileAttachment: !!preparedFileContext.fileData,
       };
 
       if (this.onToolCallback) {
         this.onToolCallback(toolData);
       }
 
-      const preparedFileContext = this.prepareToolFileContext(
-        toolData.tool,
-        toolData.input,
-        toolData.title,
-        toolData.metadata,
-      );
       if (preparedFileContext.fileData && this.onToolFileCallback) {
         this.onToolFileCallback({
           ...toolData,
