@@ -62,6 +62,7 @@ describe("opencode/events", () => {
 
     expect(subscribeMock).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
+      onActivity: expect.any(Function),
     });
     expect(callback).toHaveBeenCalledTimes(2);
     expect(callback.mock.calls[0][0]).toEqual(eventA);

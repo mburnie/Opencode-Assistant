@@ -141,6 +141,9 @@ class SummaryAggregator {
   // session.idle is kept as a fallback. Remembers which signal completed the
   // latest turn so the other one, if also emitted, does not complete it twice.
   private turnCompletionSignals: Map<string, "succeeded" | "idle"> = new Map();
+  // Diagnostics only (/doctor): terminal event of the most recent root turn.
+  // Deliberately not reset by clear() so it survives session switches.
+  private lastTurnCompletion: { event: string; sessionId: string; at: number } | null = null;
   private onCompleteCallback: MessageCompleteCallback | null = null;
   private onPartialCallback: MessagePartialCallback | null = null;
   private onExternalUserInputCallback: ExternalUserInputCallback | null = null;
@@ -416,6 +419,14 @@ class SummaryAggregator {
         logger.debug(`[Aggregator] Unhandled event type: ${eventType}`);
         break;
     }
+  }
+
+  getLastTurnCompletion(): { event: string; sessionId: string; at: number } | null {
+    return this.lastTurnCompletion;
+  }
+
+  private recordTurnCompletion(event: string, sessionId: string): void {
+    this.lastTurnCompletion = { event, sessionId, at: Date.now() };
   }
 
   setSession(sessionId: string): void {
@@ -973,6 +984,7 @@ class SummaryAggregator {
 
     if (sessionID !== this.currentSessionId) return;
 
+    this.recordTurnCompletion(event.type, sessionID);
     this.stopTypingIndicator();
 
     // Flush any accumulated assistant messages
@@ -1042,6 +1054,7 @@ class SummaryAggregator {
     }
 
     if (sessionID !== this.currentSessionId) return;
+    this.recordTurnCompletion(event.type, sessionID);
     this.stopTypingIndicator();
 
     if (this.onSessionErrorCallback) {
@@ -1062,6 +1075,7 @@ class SummaryAggregator {
     }
 
     if (sessionID !== this.currentSessionId) return;
+    this.recordTurnCompletion(event.type, sessionID);
     this.stopTypingIndicator();
 
     if (this.onSessionErrorCallback) {

@@ -14,6 +14,25 @@ let isListening = false;
 let activeDirectory: string | null = null;
 let streamAbortController: AbortController | null = null;
 let listenerGeneration = 0;
+// Last time the stream showed any sign of life (event or keepalive frame).
+let lastActivityAt: number | null = null;
+
+export interface EventStreamStatus {
+  listening: boolean;
+  connected: boolean;
+  directory: string | null;
+  lastActivityAt: number | null;
+}
+
+/** Read-only snapshot for diagnostics (/doctor). */
+export function getEventStreamStatus(): EventStreamStatus {
+  return {
+    listening: isListening,
+    connected: eventStream !== null,
+    directory: activeDirectory,
+    lastActivityAt,
+  };
+}
 
 function getReconnectDelayMs(attempt: number): number {
   const exponentialDelay = RECONNECT_BASE_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1));
@@ -72,6 +91,9 @@ export async function subscribeToEvents(directory: string, callback: EventCallba
       try {
         const stream = opencodeClientV2.event.subscribe({
           signal: controller.signal,
+          onActivity: () => {
+            lastActivityAt = Date.now();
+          },
         });
 
         if (!stream || typeof stream[Symbol.asyncIterator] !== "function") {
@@ -82,6 +104,8 @@ export async function subscribeToEvents(directory: string, callback: EventCallba
         eventStream = stream[Symbol.asyncIterator]();
 
         for await (const event of stream) {
+          lastActivityAt = Date.now();
+
           if (!isListening || activeDirectory !== directory || controller.signal.aborted) {
             logger.debug(`Event listener stopped or changed directory, breaking loop`);
             break;

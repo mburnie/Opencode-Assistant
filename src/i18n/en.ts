@@ -1,5 +1,6 @@
 export const en = {
   "cmd.description.status": "Server and session status",
+  "cmd.description.doctor": "Health diagnostics (read-only)",
   "cmd.description.new": "Create a new session",
   "cmd.description.stop": "Stop current action",
   "cmd.description.sessions": "List sessions",

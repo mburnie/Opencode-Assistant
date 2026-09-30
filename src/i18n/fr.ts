@@ -2,6 +2,7 @@ import type { I18nDictionary } from "./en.js";
 
 export const fr: I18nDictionary = {
   "cmd.description.status": "Statut du serveur et de la session",
+  "cmd.description.doctor": "Diagnostic de santé (lecture seule)",
   "cmd.description.new": "Créer une nouvelle session",
   "cmd.description.stop": "Arrêter l'action en cours",
   "cmd.description.sessions": "Lister les sessions",

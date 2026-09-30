@@ -11,6 +11,7 @@ import { BOT_COMMANDS } from "./commands/definitions.js";
 import { startCommand } from "./commands/start.js";
 import { helpCommand } from "./commands/help.js";
 import { statusCommand } from "./commands/status.js";
+import { doctorCommand } from "./commands/doctor.js";
 import { sessionsCommand, handleSessionSelect } from "./commands/sessions.js";
 import { newCommand } from "./commands/new.js";
 import { projectsCommand, handleProjectSelect } from "./commands/projects.js";
@@ -240,6 +241,7 @@ export function createBot(): Bot<Context> {
   bot.command("start", startCommand);
   bot.command("help", helpCommand);
   bot.command("status", statusCommand);
+  bot.command("doctor", doctorCommand);
   bot.command("tts", ttsCommand);
   bot.command("opencode_start", opencodeStartCommand);
   bot.command("opencode_stop", opencodeStopCommand);
