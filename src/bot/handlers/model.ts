@@ -12,7 +12,6 @@ import { getCurrentSession } from "../../session/manager.js";
 import { formatModelForDisplay } from "../../model/types.js";
 import type { ModelInfo } from "../../model/types.js";
 import { logger } from "../../utils/logger.js";
-import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { interactionManager } from "../../interaction/manager.js";
 import type { InteractionState } from "../../interaction/types.js";

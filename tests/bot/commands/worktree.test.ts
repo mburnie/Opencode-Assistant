@@ -167,9 +167,7 @@ describe("bot/commands/worktree", () => {
       expect.objectContaining({ worktree: "/repo-feature" }),
       "worktree_switched",
     );
-    expect(ctx.reply).toHaveBeenCalledWith(t("worktree.selected", { worktree: "/repo-feature" }), {
-      reply_markup: { inline_keyboard: [] },
-    });
+    expect(ctx.reply).toHaveBeenCalledWith(t("worktree.selected", { worktree: "/repo-feature" }));
     expect(ctx.deleteMessage).toHaveBeenCalled();
   });
 

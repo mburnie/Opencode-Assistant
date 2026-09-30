@@ -15,7 +15,6 @@ function shouldHideToolMessages(): boolean {
 }
 import { t } from "../i18n/index.js";
 import { interactionManager as _interactionManager } from "../interaction/manager.js";
-import { clearAllInteractionState } from "../interaction/cleanup.js";
 import { subscribeToEvents } from "../opencode/events.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
 import { foregroundSessionState } from "../scheduled-task/foreground-state.js";
@@ -445,7 +444,6 @@ export function createEventSubscriber(
         );
 
         const contextSize = tokens.input + tokens.cacheRead;
-        const contextLimit = pinnedMessageManager.getContextLimit();
 
         // Skip non-completed messages with zero context: a new assistant message
         // starts with tokens={input:0, ...} which would overwrite valid context

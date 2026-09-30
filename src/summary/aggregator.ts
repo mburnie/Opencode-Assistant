@@ -509,7 +509,7 @@ class SummaryAggregator {
     if (sessionID !== this.currentSessionId && !this.isTrackedChildSession(sessionID)) return;
 
     if (sessionID === this.currentSessionId) {
-      const textState = this.getOrCreateTextMessageState(assistantMessageID);
+      this.getOrCreateTextMessageState(assistantMessageID);
       if (!this.messages.has(assistantMessageID)) {
         this.messages.set(assistantMessageID, { role: "assistant" });
         this.messageCount++;
@@ -594,7 +594,7 @@ class SummaryAggregator {
 
   private handleToolCalled(event: V2Event): void {
     if (event.type !== "session.tool.called") return;
-    const { sessionID, assistantMessageID, id, input, executed } = event.data;
+    const { sessionID, input } = event.data;
 
     const isCurrentRoot = sessionID === this.currentSessionId;
     const isTrackedChild = this.isTrackedChildSession(sessionID);
@@ -626,21 +626,12 @@ class SummaryAggregator {
       this.subagentTracker.updateFromTaskTool(sessionID, input as { [key: string]: unknown });
     }
 
-    const toolData: ToolInfo = {
-      sessionId: sessionID,
-      messageId: assistantMessageID,
-      callId: id,
-      tool: toolName ?? "unknown",
-      state: { status: "running", input: input as { [key: string]: unknown } },
-      input: input as { [key: string]: unknown },
-    };
-
     this.lastUpdated = Date.now();
   }
 
   private handleToolProgress(event: V2Event): void {
     if (event.type !== "session.tool.progress") return;
-    const { sessionID, id, metadata } = event.data;
+    const { sessionID, metadata } = event.data;
 
     if (sessionID !== this.currentSessionId && !this.isTrackedChildSession(sessionID)) return;
 

@@ -31,8 +31,6 @@ import type {
   McpConnectInput,
   McpDisconnectInput,
   McpServer,
-  CredentialUpdateInput,
-  IntegrationOauthConnectInput,
 } from "@opencode/client/promise";
 import type { PermissionRequest as LegacyPermissionRequest } from "../permission/types.js";
 import { config } from "../config.js";

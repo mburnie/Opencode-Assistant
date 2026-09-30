@@ -4,7 +4,6 @@ import {
   getActiveSessions,
   promptSession,
   type LegacyFilePart,
-  type LegacyTextPart,
 } from "../../opencode/client-v2.js";
 import { clearSession, getCurrentSession, setCurrentSession } from "../../session/manager.js";
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";

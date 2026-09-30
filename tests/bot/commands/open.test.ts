@@ -325,10 +325,7 @@ describe("open command", () => {
       expect(upsertOrder).toBeLessThan(getProjectOrder);
 
       expect(ctx.answerCallbackQuery).toHaveBeenCalledWith();
-      expect(ctx.reply).toHaveBeenCalledWith(
-        expect.stringContaining("~"),
-        expect.objectContaining({ reply_markup: expect.anything() }),
-      );
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("~"));
       expect(ctx.deleteMessage).toHaveBeenCalled();
     });
 

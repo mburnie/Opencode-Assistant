@@ -114,6 +114,8 @@ describe("bot/commands/start", () => {
     expect(mocked.pinnedInitializeMock).toHaveBeenCalledWith(ctx.api, 100);
     expect(mocked.pinnedRefreshContextLimitMock).toHaveBeenCalledTimes(1);
 
-    expect(ctx.reply).toHaveBeenCalledWith(t("start.welcome"));
+    expect(ctx.reply).toHaveBeenCalledWith(t("start.welcome"), {
+      reply_markup: { remove_keyboard: true },
+    });
   });
 });

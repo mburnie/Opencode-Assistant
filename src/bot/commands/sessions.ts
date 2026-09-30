@@ -3,7 +3,6 @@ import { CommandContext, Context } from "grammy";
 import { InlineKeyboard } from "grammy";
 import { listSessions, getSession } from "../../opencode/client-v2.js";
 import { listMessages } from "../../opencode/client-v2-messages.js";
-import { resolveProjectAgent } from "../../agent/manager.js";
 import { setCurrentSession, SessionInfo } from "../../session/manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
