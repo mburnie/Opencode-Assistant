@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import { cleanupBotRuntime, createBot } from "../bot/index.js";
 import { config } from "../config.js";
@@ -14,6 +15,7 @@ import { startMemorySummaryWatcher, stopMemorySummaryWatcher } from "../memory/w
 import { migrateFromFiles, syncIdentityDocumentsFromFiles } from "../memory/migrate-from-files.js";
 import { closeDb } from "../memory/db.js";
 import { startMcpHttpServer, type McpHttpServerHandle } from "../mcp/http-server.js";
+import { formatGitRevision, getGitRevision } from "../git/revision.js";
 import { getRuntimeMode } from "../runtime/mode.js";
 import { getRuntimePaths, migrateLegacyAppHome } from "../runtime/paths.js";
 import { clearServiceStateFile } from "../service/manager.js";
@@ -60,9 +62,10 @@ export async function startBotApp(): Promise<void> {
   const mode = getRuntimeMode();
   const runtimePaths = getRuntimePaths();
   const version = await getBotVersion();
+  const revision = await getGitRevision(fileURLToPath(new URL("../..", import.meta.url)));
   const logFilePath = getLogFilePath();
 
-  logger.info(`Starting Opencode-Assistant v${version}...`);
+  logger.info(`Starting Opencode-Assistant v${version} (${formatGitRevision(revision)})...`);
   logger.info(`Config loaded from ${runtimePaths.envFilePath}`);
   if (logFilePath) {
     logger.info(`Logs are written to ${logFilePath}`);
