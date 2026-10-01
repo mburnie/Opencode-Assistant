@@ -150,5 +150,23 @@ describe("memory/repositories/facts", () => {
       expect(second.id).toBe(first.id);
       expect(countFacts()).toBe(1);
     });
+
+    // Regression (1 Oct 2026): the lookup used the trimmed input but the row
+    // was stored untrimmed, so the same padded input never matched itself.
+    it("dedupes the same whitespace-padded input added twice", () => {
+      const first = addFact({ content: "  padded fact  ", category: "note" });
+      const second = addFact({ content: "  padded fact  ", category: "note" });
+
+      expect(second.id).toBe(first.id);
+      expect(countFacts()).toBe(1);
+    });
+
+    it("dedupes a plain input that follows a padded one", () => {
+      const first = addFact({ content: "  padded fact  " });
+      const second = addFact({ content: "padded fact" });
+
+      expect(second.id).toBe(first.id);
+      expect(countFacts()).toBe(1);
+    });
   });
 });

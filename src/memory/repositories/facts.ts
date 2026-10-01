@@ -69,7 +69,8 @@ export function addFact(input: AddFactInput): Fact {
     .prepare(
       "INSERT INTO facts (category, content, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     )
-    .run(input.category ?? null, input.content, input.source ?? null, now, now);
+    // Store the trimmed text the duplicate lookup above compares against.
+    .run(input.category ?? null, trimmed || input.content, input.source ?? null, now, now);
 
   const fact = getFactById(Number(result.lastInsertRowid));
   if (!fact) {

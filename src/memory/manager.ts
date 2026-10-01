@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../utils/logger.js";
+import { getDb } from "./db.js";
 
 export type WritableMemoryFile = "memory" | "context" | "agents" | "skills";
 export type MemoryFile = WritableMemoryFile | "soul";
@@ -221,6 +222,11 @@ export async function backupMemory(): Promise<string> {
       }
     }
   }
+
+  // SQLite is the source of truth for memory (facts, documents, skills,
+  // tasks, audit); the .md files above are the legacy pre-SQLite copies.
+  // The online backup API gives a consistent snapshot while the bot writes.
+  await getDb().backup(path.join(backupPath, "data.db"));
 
   logger.info(`[Memory] Backup created at ${backupPath}`);
   return backupPath;
