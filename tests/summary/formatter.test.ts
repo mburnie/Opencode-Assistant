@@ -221,6 +221,91 @@ describe("summary/formatter", () => {
     expect(text).toHaveLength("💻 bash ".length + 128);
   });
 
+  // Regression (2 Oct 2026): OpenCode V2's code-mode `execute` tool has only a
+  // `code` field, so the generic fallback posted the whole program to Telegram.
+  it("shows the tools an execute call invokes instead of its code", () => {
+    const text = formatToolInfo({
+      sessionId: "s1",
+      messageId: "m4c",
+      callId: "c4c",
+      tool: "execute",
+      state: { status: "completed" } as never,
+      input: {
+        code: 'const r = await tools["opencode-assistant-memory"].memory_read({ name: "session-summary" });\nreturn r;',
+      },
+    });
+
+    expect(text).toBe("🛠️ execute memory_read");
+  });
+
+  it("shows only the first line of execute code that calls no tools", () => {
+    const text = formatToolInfo({
+      sessionId: "s1",
+      messageId: "m4d",
+      callId: "c4d",
+      tool: "execute",
+      state: { status: "completed" } as never,
+      input: {
+        code: "\nconst out = {};\nasync function tryFetch(name, url) {\n  return fetch(url);\n}\nreturn out;",
+      },
+    });
+
+    expect(text).toBe("🛠️ execute const out = {};");
+  });
+
+  it("names the sites an execute call fetches", () => {
+    const text = formatToolInfo({
+      sessionId: "s1",
+      messageId: "m4f",
+      callId: "c4f",
+      tool: "execute",
+      state: { status: "completed" } as never,
+      input: {
+        code: [
+          "const out = {};",
+          'await tryFetch("yahoo", "https://query1.finance.yahoo.com/v8/finance/chart/P?range=1d");',
+          'await tryFetch("stooq", "https://stooq.com/q/l/?s=p.us");',
+          'const again = await fetch("https://stooq.com/q/d/?s=p.us");',
+          "return out;",
+        ].join("\n"),
+      },
+    });
+
+    expect(text).toBe("🛠️ execute fetch query1.finance.yahoo.com, stooq.com");
+  });
+
+  it("cuts a long first line of execute code to 64 characters", () => {
+    const text = formatToolInfo({
+      sessionId: "s1",
+      messageId: "m4g",
+      callId: "c4g",
+      tool: "execute",
+      state: { status: "completed" } as never,
+      input: {
+        code: `const value = computeSomething(${"x".repeat(100)});\nreturn value;`,
+      },
+    });
+
+    expect(text?.endsWith("...")).toBe(true);
+    expect(text).toHaveLength("🛠️ execute ".length + 64);
+  });
+
+  it("caps long details of other tools like bash commands", () => {
+    const text = formatToolInfo({
+      sessionId: "s1",
+      messageId: "m4e",
+      callId: "c4e",
+      tool: "websearch",
+      state: { status: "completed" } as never,
+      input: {
+        query: "q".repeat(300),
+      },
+    });
+
+    expect(text?.endsWith("...")).toBe(true);
+    expect(text).toHaveLength("🛠️ websearch ".length + 128);
+  });
+
   it("formats apply_patch tool details without dumping full patch", () => {
     const text = formatToolInfo({
       sessionId: "s1",

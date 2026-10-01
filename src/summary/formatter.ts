@@ -261,6 +261,30 @@ function getToolDetails(tool: string, input?: { [key: string]: unknown }): strin
   return "";
 }
 
+const EXECUTE_FIRST_LINE_MAX_LENGTH = 64;
+
+// OpenCode V2's code-mode `execute` tool carries a whole program in `code`.
+// Name the MCP tools it calls (tools["server"].name(...)), else the sites it
+// fetches, else its first line.
+function summarizeExecuteCode(code: string): string {
+  const called = [...code.matchAll(/tools(?:\[\s*["'][^"']+["']\s*\]|\.\w+)\.(\w+)\s*\(/g)].map(
+    (match) => match[1],
+  );
+  if (called.length > 0) {
+    return [...new Set(called)].join(", ");
+  }
+  const hosts = [...code.matchAll(/["'`]https?:\/\/([^/"'`\s:?#]+)/g)].map((match) => match[1]);
+  if (hosts.length > 0) {
+    return `fetch ${[...new Set(hosts)].join(", ")}`;
+  }
+  const firstLine =
+    code
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean) ?? "";
+  return truncateWithEllipsis(firstLine, EXECUTE_FIRST_LINE_MAX_LENGTH);
+}
+
 function getToolIcon(tool: string): string {
   switch (tool) {
     case "read":
@@ -387,6 +411,15 @@ export function formatToolInfo(toolInfo: ToolInfo): string | null {
 
   if (tool === "bash" && input && typeof input.command === "string") {
     details = truncateWithEllipsis(input.command, config.bot.bashToolDisplayMaxLength);
+  }
+
+  if (tool === "execute" && input && typeof input.code === "string") {
+    details = summarizeExecuteCode(input.code);
+  }
+
+  // Any tool's detail is capped like bash commands so no input floods the chat.
+  if (details) {
+    details = truncateWithEllipsis(details, config.bot.bashToolDisplayMaxLength);
   }
 
   if (tool === "apply_patch") {
